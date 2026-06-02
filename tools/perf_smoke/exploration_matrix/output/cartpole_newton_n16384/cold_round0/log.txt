@@ -1,0 +1,110 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend json --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/cartpole_newton_n16384/cold_round0 --task Isaac-Cartpole-v0 --num_envs 16384 --num_frames 500 --headless --seed 42 physics=newton_mjwarp
+
+I: Initializing Version 2.71.1-release.7015+gl.fe6333da
+I: Client ID: 691CRMK9
+I: Not using Hub: Hub not found
+I: Successfully created S3 provider for https://omniverse-content-staging.s3-us-west-2.amazonaws.com
+Warning: The rigid body at /World/envs/env_0/Robot/slider has a possibly invalid inertia tensor of {1.0, 1.0, 1.0} and a negative mass. Either specify correct values in the mass properties, or add collider(s) to any shape(s) that you wish to automatically compute mass properties for. If you do not want the objects to collide, add colliders regardless then disable the 'enable collision' property. [python3.12]
+Warning: The rigid body at /World/envs/env_0/Robot/cart has a possibly invalid inertia tensor of {1.0, 1.0, 1.0}, small sphere approximated inertia was used. Either specify correct values in the mass properties, or add collider(s) to any shape(s) that you wish to automatically compute mass properties for. If you do not want the objects to collide, add colliders regardless then disable the 'enable collision' property. [python3.12]
+Warning: The rigid body at /World/envs/env_0/Robot/pole has a possibly invalid inertia tensor of {1.0, 1.0, 1.0}, small sphere approximated inertia was used. Either specify correct values in the mass properties, or add collider(s) to any shape(s) that you wish to automatically compute mass properties for. If you do not want the objects to collide, add colliders regardless then disable the 'enable collision' property. [python3.12]
+/home/horde/dev/IsaacLab-fork/source/isaaclab_newton/isaaclab_newton/physics/newton_manager.py:973: FutureWarning: Newton shape color replacement is enabled; this workaround will be deprecated in a future release.
+  replace_newton_shape_colors(cls._model)
+Failed to get root com velocity. If the articulation is fixed, this is expected. Setting root com velocity to zeros.
+[INFO]: Parsing configuration from: isaaclab_tasks.manager_based.classic.cartpole.cartpole_env_cfg:CartpoleEnvCfg
+[INFO]: Base environment:
+	Environment device    : cuda:0
+	Environment seed      : 42
+	Physics step-size     : 0.008333333333333333
+	Rendering step-size   : 0.016666666666666666
+	Environment step-size : 0.016666666666666666
+[INFO]: Time taken for scene creation Last: 21.192811 s, Mean: 21.192811 s, Std: 0.000000 s, N: 1
+[INFO]: Scene manager:  <class InteractiveScene>
+	Number of environments: 16384
+	Environment spacing   : 4.0
+	Source prim name      : /World/envs/env_0
+	Global prim paths     : []
+	Replicate physics     : True
+Finalize builder took: Last: 5.776111 s, Mean: 5.776111 s, Std: 0.000000 s, N: 1
+Initialize solver took: Last: 44.768043 s, Mean: 44.768043 s, Std: 0.000000 s, N: 1
+CUDA graph took: Last: 36.429175 s, Mean: 36.429175 s, Std: 0.000000 s, N: 1
+[INFO]: Time taken for simulation start Last: 125.617094 s, Mean: 125.617094 s, Std: 0.000000 s, N: 1
+[INFO] Command Manager:  <CommandManager> contains 0 active terms.
++------------------------+
+|  Active Command Terms  |
++--------+-------+-------+
+| Index  | Name  |  Type |
++--------+-------+-------+
++--------+-------+-------+
+
+[INFO] Event Manager:  <EventManager> contains 1 active terms.
++-------------------------------------+
+| Active Event Terms in Mode: 'reset' |
++---------+---------------------------+
+|  Index  | Name                      |
++---------+---------------------------+
+|    0    | reset_cart_position       |
+|    1    | reset_pole_position       |
++---------+---------------------------+
+
+[INFO] Recorder Manager:  <RecorderManager> contains 0 active terms.
++---------------------+
+| Active Recorder Terms |
++-----------+---------+
+|   Index   | Name    |
++-----------+---------+
++-----------+---------+
+
+[INFO] Action Manager:  <ActionManager> contains 1 active terms.
++----------------------------------+
+|  Active Action Terms (shape: 1)  |
++-------+--------------+-----------+
+| Index | Name         | Dimension |
++-------+--------------+-----------+
+|   0   | joint_effort |         1 |
++-------+--------------+-----------+
+
+[INFO] Observation Manager: <ObservationManager> contains 1 groups.
++------------------------------------------------------+
+| Active Observation Terms in Group: 'policy' (shape: (4,)) |
++------------+----------------------------+------------+
+|   Index    | Name                       |   Shape    |
++------------+----------------------------+------------+
+|     0      | joint_pos_rel              |    (2,)    |
+|     1      | joint_vel_rel              |    (2,)    |
++------------+----------------------------+------------+
+
+[INFO] Termination Manager:  <TerminationManager> contains 2 active terms.
++---------------------------------------+
+|        Active Termination Terms       |
++-------+--------------------+----------+
+| Index | Name               | Time Out |
++-------+--------------------+----------+
+|   0   | time_out           |   True   |
+|   1   | cart_out_of_bounds |  False   |
++-------+--------------------+----------+
+
+[INFO] Reward Manager:  <RewardManager> contains 6 active terms.
++-------------------------------+
+|      Active Reward Terms      |
++-------+--------------+--------+
+| Index | Name         | Weight |
++-------+--------------+--------+
+|   0   | alive        |    1.0 |
+|   1   | terminating  |   -2.0 |
+|   2   | pole_pos     |   -1.0 |
+|   3   | cart_vel     |  -0.01 |
+|   4   | pole_vel     | -0.005 |
+|   5   | success_rate |    0.0 |
++-------+--------------+--------+
+
+[INFO] Curriculum Manager:  <CurriculumManager> contains 0 active terms.
++----------------------+
+| Active Curriculum Terms |
++-----------+----------+
+|   Index   | Name     |
++-----------+----------+
++-----------+----------+
+
+[INFO]: Completed setting up the environment...
+Results written to: /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/cartpole_newton_n16384/cold_round0/benchmark_non_rl_Isaac-Cartpole-v0_2026-06-02_08-19-33.json
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

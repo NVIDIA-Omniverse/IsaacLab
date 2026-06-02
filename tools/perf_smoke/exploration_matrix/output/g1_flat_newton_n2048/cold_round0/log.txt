@@ -1,0 +1,182 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend json --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/g1_flat_newton_n2048/cold_round0 --task Isaac-Velocity-Flat-G1-v0 --num_envs 2048 --num_frames 500 --headless --seed 42 physics=newton_mjwarp
+
+I: Initializing Version 2.71.1-release.7015+gl.fe6333da
+I: Client ID: Q1ZIWWAW
+I: Not using Hub: Hub not found
+I: Successfully created S3 provider for https://omniverse-content-staging.s3-us-west-2.amazonaws.com
+Visual material specified for ground plane but no diffuse color found. Using default color: (0.0, 0.0, 0.0)
+/home/horde/dev/IsaacLab-fork/source/isaaclab_newton/isaaclab_newton/physics/newton_manager.py:973: FutureWarning: Newton shape color replacement is enabled; this workaround will be deprecated in a future release.
+  replace_newton_shape_colors(cls._model)
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_34/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_5/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_41/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_11/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_26/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_40/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_23/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_38/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_2/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_22/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_32/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_33/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_9/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_36/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_27/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_28/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_15/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_18/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_14/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_17/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_20/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_25/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_12/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_43/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_39/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_19/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_42/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_7/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_24/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_35/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_29/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_4/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_1/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_31/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_37/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_3/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_10/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_21/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_13/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_30/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_8/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_16/mesh_0) but MaterialBindingAPI is not applied on the prim
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_6/mesh_0) but MaterialBindingAPI is not applied on the prim
+[INFO]: Parsing configuration from: isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg:G1FlatEnvCfg
+[INFO]: Base environment:
+	Environment device    : cuda:0
+	Environment seed      : 42
+	Physics step-size     : 0.005
+	Rendering step-size   : 0.02
+	Environment step-size : 0.02
+[INFO]: Time taken for scene creation Last: 20.859697 s, Mean: 20.859697 s, Std: 0.000000 s, N: 1
+[INFO]: Scene manager:  <class InteractiveScene>
+	Number of environments: 2048
+	Environment spacing   : 2.5
+	Source prim name      : /World/envs/env_0
+	Global prim paths     : ['/World/ground']
+	Replicate physics     : True
+Finalize builder took: Last: 8.976290 s, Mean: 8.976290 s, Std: 0.000000 s, N: 1
+Contact sensor construction took: Last: 0.689981 s, Mean: 0.689981 s, Std: 0.000000 s, N: 1
+Initialize solver took: Last: 43.040712 s, Mean: 43.040712 s, Std: 0.000000 s, N: 1
+CUDA graph took: Last: 149.691448 s, Mean: 149.691448 s, Std: 0.000000 s, N: 1
+[INFO]: Time taken for simulation start Last: 242.544853 s, Mean: 242.544853 s, Std: 0.000000 s, N: 1
+[INFO] Command Manager:  <CommandManager> contains 1 active terms.
++------------------------------------------------+
+|              Active Command Terms              |
++-------+---------------+------------------------+
+| Index | Name          |          Type          |
++-------+---------------+------------------------+
+|   0   | base_velocity | UniformVelocityCommand |
++-------+---------------+------------------------+
+
+[INFO] Event Manager:  <EventManager> contains 3 active terms.
++--------------------------------------+
+| Active Event Terms in Mode: 'startup' |
++----------+---------------------------+
+|  Index   | Name                      |
++----------+---------------------------+
+|    0     | physics_material          |
++----------+---------------------------+
++---------------------------------------+
+|  Active Event Terms in Mode: 'reset'  |
++--------+------------------------------+
+| Index  | Name                         |
++--------+------------------------------+
+|   0    | base_external_force_torque   |
+|   1    | reset_base                   |
+|   2    | reset_robot_joints           |
++--------+------------------------------+
++----------------------------------------------+
+|    Active Event Terms in Mode: 'interval'    |
++-------+------------+-------------------------+
+| Index | Name       | Interval time range (s) |
++-------+------------+-------------------------+
+|   0   | push_robot |       (10.0, 15.0)      |
++-------+------------+-------------------------+
+
+[INFO] Recorder Manager:  <RecorderManager> contains 0 active terms.
++---------------------+
+| Active Recorder Terms |
++-----------+---------+
+|   Index   | Name    |
++-----------+---------+
++-----------+---------+
+
+[INFO] Action Manager:  <ActionManager> contains 1 active terms.
++------------------------------------+
+|  Active Action Terms (shape: 37)   |
++--------+-------------+-------------+
+| Index  | Name        |   Dimension |
++--------+-------------+-------------+
+|   0    | joint_pos   |          37 |
++--------+-------------+-------------+
+
+[INFO] Observation Manager: <ObservationManager> contains 1 groups.
++---------------------------------------------------------+
+| Active Observation Terms in Group: 'policy' (shape: (123,)) |
++-----------+---------------------------------+-----------+
+|   Index   | Name                            |   Shape   |
++-----------+---------------------------------+-----------+
+|     0     | base_lin_vel                    |    (3,)   |
+|     1     | base_ang_vel                    |    (3,)   |
+|     2     | projected_gravity               |    (3,)   |
+|     3     | velocity_commands               |    (3,)   |
+|     4     | joint_pos                       |   (37,)   |
+|     5     | joint_vel                       |   (37,)   |
+|     6     | actions                         |   (37,)   |
++-----------+---------------------------------+-----------+
+
+[INFO] Termination Manager:  <TerminationManager> contains 2 active terms.
++---------------------------------+
+|     Active Termination Terms    |
++-------+--------------+----------+
+| Index | Name         | Time Out |
++-------+--------------+----------+
+|   0   | time_out     |   True   |
+|   1   | base_contact |  False   |
++-------+--------------+----------+
+
+[INFO] Reward Manager:  <RewardManager> contains 16 active terms.
++------------------------------------------+
+|           Active Reward Terms            |
++-------+-------------------------+--------+
+| Index | Name                    | Weight |
++-------+-------------------------+--------+
+|   0   | track_lin_vel_xy_exp    |    1.0 |
+|   1   | track_ang_vel_z_exp     |    1.0 |
+|   2   | lin_vel_z_l2            |   -0.2 |
+|   3   | ang_vel_xy_l2           |  -0.05 |
+|   4   | dof_torques_l2          | -2e-06 |
+|   5   | dof_acc_l2              | -1e-07 |
+|   6   | action_rate_l2          | -0.005 |
+|   7   | feet_air_time           |   0.75 |
+|   8   | flat_orientation_l2     |   -1.0 |
+|   9   | dof_pos_limits          |   -1.0 |
+|   10  | termination_penalty     | -200.0 |
+|   11  | feet_slide              |   -0.1 |
+|   12  | joint_deviation_hip     |   -0.1 |
+|   13  | joint_deviation_arms    |   -0.1 |
+|   14  | joint_deviation_fingers |  -0.05 |
+|   15  | joint_deviation_torso   |   -0.1 |
++-------+-------------------------+--------+
+
+[INFO] Curriculum Manager:  <CurriculumManager> contains 0 active terms.
++----------------------+
+| Active Curriculum Terms |
++-----------+----------+
+|   Index   | Name     |
++-----------+----------+
++-----------+----------+
+
+[INFO]: Completed setting up the environment...
+Results written to: /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/g1_flat_newton_n2048/cold_round0/benchmark_non_rl_Isaac-Velocity-Flat-G1-v0_2026-06-02_02-03-40.json
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

@@ -1,0 +1,36 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend json --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/shadow_vision_newton_warp_128x128_n128/warm_round3 --task Isaac-Repose-Cube-Shadow-Vision-Direct-v0 --num_envs 128 --num_frames 500 --headless --seed 42 --enable_cameras physics=newton_mjwarp presets=newton_renderer presets=rgb env.tiled_camera.width=128 env.tiled_camera.height=128
+
+I: Initializing Version 2.71.1-release.7015+gl.fe6333da
+I: Client ID: 6TZWINR9
+I: Not using Hub: Hub not found
+I: Successfully created S3 provider for https://omniverse-content-staging.s3-us-west-2.amazonaws.com
+Warning: The rigid body at /World/envs/env_0/object has a possibly invalid inertia tensor of {1.0, 1.0, 1.0}, small sphere approximated inertia was used. Either specify correct values in the mass properties, or add collider(s) to any shape(s) that you wish to automatically compute mass properties for. If you do not want the objects to collide, add colliders regardless then disable the 'enable collision' property. [python3.12]
+/home/horde/dev/IsaacLab-fork/env_isaaclab/lib/python3.12/site-packages/newton/_src/sim/builder.py:2601: UserWarning: Body /World/envs/env_0/object: authored mass and density without authored diagonalInertia. Ignoring body-level density.
+  return parse_usd(
+/home/horde/dev/IsaacLab-fork/source/isaaclab_newton/isaaclab_newton/physics/newton_manager.py:973: FutureWarning: Newton shape color replacement is enabled; this workaround will be deprecated in a future release.
+  replace_newton_shape_colors(cls._model)
+Warning: in BindingsAtPrim at line 669 of /opt/USD/pxr/usd/usdShade/materialBindingAPI.cpp -- Found material bindings on prim at path (/__Prototype_47/visuals) but MaterialBindingAPI is not applied on the prim
+Failed to get root com velocity. If the articulation is fixed, this is expected. Setting root com velocity to zeros.
+Not all actuators are configured! Total number of actuated joints not equal to number of joints available: 20 != 24.
+[INFO]: Parsing configuration from: isaaclab_tasks.direct.shadow_hand.shadow_hand_vision_env_cfg:ShadowHandVisionEnvCfg
+[INFO]: Base environment:
+	Environment device    : cuda:0
+	Environment seed      : 42
+	Physics step-size     : 0.008333333333333333
+	Rendering step-size   : 0.016666666666666666
+	Environment step-size : 0.016666666666666666
+[INFO]: Time taken for scene creation Last: 2.382163 s, Mean: 2.382163 s, Std: 0.000000 s, N: 1
+[INFO]: Scene manager:  <class InteractiveScene>
+	Number of environments: 128
+	Environment spacing   : 2.0
+	Source prim name      : /World/envs/env_0
+	Global prim paths     : []
+	Replicate physics     : True
+[INFO]: Starting the simulation. This may take a few seconds. Please wait...
+Finalize builder took: Last: 0.790932 s, Mean: 0.790932 s, Std: 0.000000 s, N: 1
+Initialize solver took: Last: 2.860067 s, Mean: 2.860067 s, Std: 0.000000 s, N: 1
+CUDA graph took: Last: 1.728253 s, Mean: 1.728253 s, Std: 0.000000 s, N: 1
+[INFO]: Time taken for simulation start Last: 5.958173 s, Mean: 5.958173 s, Std: 0.000000 s, N: 1
+[INFO]: Completed setting up the environment...
+Results written to: /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/shadow_vision_newton_warp_128x128_n128/warm_round3/benchmark_non_rl_Isaac-Repose-Cube-Shadow-Vision-Direct-v0_2026-06-02_01-51-44.json
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

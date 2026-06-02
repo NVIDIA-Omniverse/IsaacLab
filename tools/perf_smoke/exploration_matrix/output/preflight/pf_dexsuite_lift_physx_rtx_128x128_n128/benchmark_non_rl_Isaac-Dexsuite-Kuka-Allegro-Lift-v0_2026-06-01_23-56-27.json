@@ -1,0 +1,517 @@
+[
+    {
+        "phase_name": "benchmark_info",
+        "measurements": [],
+        "metadata": [
+            {
+                "name": "benchmark_non_rl benchmark_info phase",
+                "data": "benchmark_info",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info timestamp",
+                "data": "2026-06-01T23:56:27.228009",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info task",
+                "data": "Isaac-Dexsuite-Kuka-Allegro-Lift-v0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info seed",
+                "data": 42,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info num_envs",
+                "data": 128,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info num_frames",
+                "data": 10,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl benchmark_info presets",
+                "data": "physx,isaacsim_rtx_renderer,single_camera,rgb128",
+                "type": "string"
+            }
+        ]
+    },
+    {
+        "phase_name": "startup",
+        "measurements": [
+            {
+                "name": "benchmark_non_rl startup App Launch Time",
+                "value": 9761.80532,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl startup Python Imports Time",
+                "value": 344.260008,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl startup Task Creation and Start Time",
+                "value": 11233.006048,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl startup Scene Creation Time",
+                "value": 2029.1004870086908,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl startup Simulation Start Time",
+                "value": 6227.504499955103,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl startup Total Start Time (Launch to Train)",
+                "value": 20994.838109,
+                "unit": "ms",
+                "type": "single"
+            }
+        ],
+        "metadata": [
+            {
+                "name": "benchmark_non_rl startup phase",
+                "data": "startup",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl startup workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            }
+        ]
+    },
+    {
+        "phase_name": "runtime",
+        "measurements": [
+            {
+                "name": "benchmark_non_rl runtime Step Frametimes",
+                "value": {
+                    "Environment step times": [
+                        1502.994356,
+                        168.961848,
+                        119.121614,
+                        139.120747,
+                        161.901616,
+                        176.270792,
+                        140.411667,
+                        135.969761,
+                        119.075951,
+                        128.999009
+                    ],
+                    "Environment step FPS": [
+                        0.6653384931273821,
+                        5.9184958725120005,
+                        8.394782159348512,
+                        7.188000507214069,
+                        6.176590603024,
+                        5.673089617705921,
+                        7.121915303519614,
+                        7.3545764340940485,
+                        8.39800137309002,
+                        7.7519975366632465
+                    ],
+                    "Environment step effective FPS": [
+                        85.16332712030491,
+                        757.5674716815361,
+                        1074.5321163966096,
+                        920.0640649234008,
+                        790.603597187072,
+                        726.1554710663579,
+                        911.6051588505106,
+                        941.3857835640382,
+                        1074.9441757555226,
+                        992.2556846928956
+                    ]
+                },
+                "type": "dict"
+            },
+            {
+                "name": "benchmark_non_rl runtime Min Environment step times",
+                "value": 119.075951,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Max Environment step times",
+                "value": 1502.994356,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Mean Environment step times",
+                "value": 279.2827361,
+                "unit": "ms",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Min Environment step FPS",
+                "value": 0.6653384931273821,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Max Environment step FPS",
+                "value": 8.39800137309002,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Mean Environment step FPS",
+                "value": 6.464278790029882,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Min Environment step effective FPS",
+                "value": 85.16332712030491,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Max Environment step effective FPS",
+                "value": 1074.9441757555226,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime Mean Environment step effective FPS",
+                "value": 827.4276851238249,
+                "unit": "FPS",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime CPU Utilization",
+                "value": 231.15,
+                "unit": "%",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime CPU Utilization std",
+                "value": 185.69210178859697,
+                "unit": "%",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime CPU Utilization n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Memory Used",
+                "value": 10.4,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Memory Used std",
+                "value": 0.16,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Memory Used n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Utilization",
+                "value": 10.25,
+                "unit": "%",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Utilization std",
+                "value": 9.95,
+                "unit": "%",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime GPU Utilization n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory RSS",
+                "value": 7.48,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory RSS std",
+                "value": 0.04,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory RSS n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory VMS",
+                "value": 190.58,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory VMS std",
+                "value": 0.07,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory VMS n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory USS",
+                "value": 7.44,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory USS std",
+                "value": 0.04,
+                "unit": "GB",
+                "type": "single"
+            },
+            {
+                "name": "benchmark_non_rl runtime System Memory USS n",
+                "value": 4,
+                "unit": "",
+                "type": "single"
+            }
+        ],
+        "metadata": [
+            {
+                "name": "benchmark_non_rl runtime phase",
+                "data": "runtime",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl runtime workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            }
+        ]
+    },
+    {
+        "phase_name": "hardware_info",
+        "measurements": [],
+        "metadata": [
+            {
+                "name": "benchmark_non_rl hardware_info phase",
+                "data": "hardware_info",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info cpu_name",
+                "data": "Intel Xeon Processor (Icelake)",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info physical_cores",
+                "data": 16,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info gpu_device_count",
+                "data": 1,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info gpu_current_device",
+                "data": 0,
+                "type": "int"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info cuda_version",
+                "data": "12.8",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info gpu_devices",
+                "data": {
+                    "0": {
+                        "name": "NVIDIA L40S",
+                        "total_memory_gb": 47.5,
+                        "compute_capability": "8.9",
+                        "multi_processor_count": 142
+                    }
+                },
+                "type": "dict"
+            },
+            {
+                "name": "benchmark_non_rl hardware_info total_ram_gb",
+                "data": 62.79,
+                "type": "float"
+            }
+        ]
+    },
+    {
+        "phase_name": "version_info",
+        "measurements": [],
+        "metadata": [
+            {
+                "name": "benchmark_non_rl version_info phase",
+                "data": "version_info",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info workflow_name",
+                "data": "benchmark_non_rl",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_version",
+                "data": "6.1.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info warp_version",
+                "data": "1.12.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info torch_version",
+                "data": "2.10.0+cu128",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info numpy_version",
+                "data": "2.3.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_newton_version",
+                "data": "0.13.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_physx_version",
+                "data": "1.1.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_ov_version",
+                "data": "0.4.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_tasks_version",
+                "data": "1.10.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_rl_version",
+                "data": "0.5.2",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info ovrtx_version",
+                "data": "0.3.0.312915",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info newton_version",
+                "data": "1.2.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info mujoco_version",
+                "data": "3.8.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info mujoco_warp_version",
+                "data": "3.8.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info rl_games_version",
+                "data": "1.6.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info rsl_rl_version",
+                "data": "5.0.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info stable_baselines3_version",
+                "data": "2.9.0a2",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info skrl_version",
+                "data": "2.1.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info gymnasium_version",
+                "data": "1.2.1",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info cuda_bindings_version",
+                "data": "12.9.4",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info usd_core_version",
+                "data": "25.11",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info isaaclab_release_version",
+                "data": "3.0.0",
+                "type": "string"
+            },
+            {
+                "name": "benchmark_non_rl version_info dev",
+                "data": {
+                    "commit_hash": "482d21c936b863e323f0a135c8e8e8e8a9c166b2",
+                    "commit_hash_short": "482d21c9",
+                    "branch": "develop",
+                    "commit_date": "2026-05-21 14:43:26 -0400",
+                    "dirty": true
+                },
+                "type": "dict"
+            }
+        ]
+    }
+]

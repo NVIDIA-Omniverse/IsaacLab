@@ -1,0 +1,33 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend json --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/g1_rough_physx_n2048/warm_round5 --task Isaac-Velocity-Rough-G1-v0 --num_envs 2048 --num_frames 500 --headless --seed 42 physics=physx
+
+The '--headless' CLI argument is deprecated. Omit '--viz' for default headless. If config visualizers are enabled and you want to force headless, use '--viz none'.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1780381628.258091  988513 descriptor_database.cc:633] File already exists in database: grpc/health/v1/health.proto
+W0000 00:00:1780381628.258172  988513 message.cc:301] Protobuf GeneratedMessageFactory: File is already registered: grpc/health/v1/health.proto
+[ISAACLAB] AppLauncher initialization complete
+Loading user config located at: '/home/horde/dev/IsaacLab-fork/.venv/lib/python3.12/site-packages/isaacsim/kit/data/Kit/IsaacLab/3.0/user.config.json'
+2026-06-02T06:27:08Z [0ms] [Warning] [omni.ext.plugin] [ext: isaaclab_visualizers] Extensions config 'extension.toml' doesn't exist '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers' or '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers/config'
+2026-06-02T06:27:08Z [350ms] [Warning] [omni.platforminfo.plugin] failed to open the default display.  Can't verify X Server version.
+2026-06-02T06:27:08Z [368ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 550.127.05    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA L40S                      | Yes: 0 |     | 49386   MB | 10de      | 0          |
+|     |                                  |        |     |            | 26b9      | a5333911.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 5.15.0-131-generic
+| Processor: Intel Xeon Processor (Icelake)
+| Cores: 16 | Logical Cores: 16
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64297 | Free Memory: 59862
+| Total Page/Swap (MB): 4095 | Free Page/Swap: 4071
+|---------------------------------------------------------------------------------------------|
+2026-06-02T06:27:10Z [2,555ms] [Warning] [usdrt.population.plugin] Last global time was not created. Did you call setEnableUsdNoticeHandling?
+2026-06-02T06:27:12Z [4,349ms] [Warning] [isaaclab_physx.physics.physx_manager] TGS solver with enable_external_forces_every_iteration=False may cause noisy velocities.
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

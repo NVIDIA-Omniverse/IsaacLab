@@ -1,0 +1,54 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend omniperf --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/preflight/pf_shadow_vision_newton_rtx_128x128_n128 --task Isaac-Repose-Cube-Shadow-Vision-Direct-v0 --num_envs 128 --num_frames 10 --headless --seed 42 --enable_cameras physics=newton_mjwarp presets=isaacsim_rtx_renderer env.tiled_camera.width=128 env.tiled_camera.height=128
+
+Could not import kit recorders: No module named 'isaacsim.core'. Kit related measurements will not be available.
+The '--headless' CLI argument is deprecated. Omit '--viz' for default headless. If config visualizers are enabled and you want to force headless, use '--viz none'.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1779988591.916164 2754207 descriptor_database.cc:633] File already exists in database: grpc/health/v1/health.proto
+W0000 00:00:1779988591.916240 2754207 message.cc:301] Protobuf GeneratedMessageFactory: File is already registered: grpc/health/v1/health.proto
+[ISAACLAB] AppLauncher initialization complete
+Loading user config located at: '/home/horde/dev/IsaacLab-fork/.venv/lib/python3.12/site-packages/isaacsim/kit/data/Kit/IsaacLab/3.0/user.config.json'
+[Info] [carb] Logging to file: /home/horde/dev/IsaacLab-fork/.venv/lib/python3.12/site-packages/isaacsim/kit/logs/Kit/IsaacLab/3.0/kit_20260528_171631.log
+2026-05-28T17:16:31Z [15ms] [Warning] [omni.ext.plugin] [ext: isaaclab_visualizers] Extensions config 'extension.toml' doesn't exist '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers' or '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers/config'
+2026-05-28T17:16:32Z [420ms] [Warning] [omni.platforminfo.plugin] failed to open the default display.  Can't verify X Server version.
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 550.127.05    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA L40S                      | Yes: 0 |     | 49386   MB | 10de      | 0          |
+|     |                                  |        |     |            | 26b9      | a5333911.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 5.15.0-131-generic
+| Processor: Intel Xeon Processor (Icelake)
+| Cores: 16 | Logical Cores: 16
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64297 | Free Memory: 53339
+| Total Page/Swap (MB): 4095 | Free Page/Swap: 4082
+|---------------------------------------------------------------------------------------------|
+2026-05-28T17:16:34Z [2,617ms] [Warning] [carb.windowing-glfw.plugin] GLFW initialization failed.
+2026-05-28T17:16:34Z [2,617ms] [Warning] [carb] Failed to startup plugin carb.windowing-glfw.plugin (interfaces: [carb::windowing::IGLContext v1.0],[carb::windowing::IWindowing v1.5]) (impl: carb.windowing-glfw.plugin)
+2026-05-28T17:16:34Z [2,775ms] [Warning] [carb.windowing-glfw.plugin] GLFW initialization failed.
+2026-05-28T17:16:34Z [2,775ms] [Warning] [carb] Failed to startup plugin carb.windowing-glfw.plugin (interfaces: [carb::windowing::IGLContext v1.0],[carb::windowing::IWindowing v1.5]) (impl: carb.windowing-glfw.plugin)
+2026-05-28T17:16:34Z [2,778ms] [Warning] [carb.windowing-glfw.plugin] GLFW initialization failed.
+2026-05-28T17:16:34Z [2,778ms] [Warning] [carb] Failed to startup plugin carb.windowing-glfw.plugin (interfaces: [carb::windowing::IGLContext v1.0],[carb::windowing::IWindowing v1.5]) (impl: carb.windowing-glfw.plugin)
+2026-05-28T17:16:34Z [3,220ms] [Warning] [omni.log] Source: omni.hydra was already registered.
+OmniReplicatorNvExtension starting up (ext_id: omni.replicator.nv-1.1.0).
+2026-05-28T17:16:36Z [4,423ms] [Warning] [pxr.Semantics] pxr.Semantics is deprecated - please use Semantics instead
+2026-05-28T17:16:36Z [4,522ms] [Warning] [omni.replicator.core.scripts.extension] No material configuration file, adding configuration to material settings directly.
+2026-05-28T17:16:40Z [8,643ms] [Warning] [rtx.hydra] RenderDelegate : Warning /rtx/hydra/readTransformsFromFabricInRenderDelegate and geometry streaming are enabled together but this can cause issues with dynamic objects not streaming correctly due to problems in the transform update.
+2026-05-28T17:16:50Z [18,716ms] [Warning] [omni.usd] Encountered USD Warnings but USD Diagnostics are currently muted. To view USD Warnings, please set the '/persistent/app/usd/muteUsdDiagnostics' setting to false in Preferences page.
+/home/horde/dev/IsaacLab-fork/env_isaaclab/lib/python3.12/site-packages/newton/_src/sim/builder.py:2601: UserWarning: Body /World/envs/env_0/object: authored mass and density without authored diagonalInertia. Ignoring body-level density.
+  return parse_usd(
+/home/horde/dev/IsaacLab-fork/source/isaaclab_newton/isaaclab_newton/physics/newton_manager.py:973: FutureWarning: Newton shape color replacement is enabled; this workaround will be deprecated in a future release.
+  replace_newton_shape_colors(cls._model)
+2026-05-28T17:16:51Z [19,472ms] [Warning] [isaaclab_newton.assets.articulation.articulation_data] Failed to get root com velocity. If the articulation is fixed, this is expected. Setting root com velocity to zeros.
+2026-05-28T17:16:51Z [19,612ms] [Warning] [isaaclab_newton.assets.articulation.articulation] Not all actuators are configured! Total number of actuated joints not equal to number of joints available: 20 != 24.
+2026-05-28T17:17:14Z [42,405ms] [Warning] [omni.fabric.plugin] Unsupported type encountered during VtValue extraction
+2026-05-28T17:17:14Z [42,405ms] [Warning] [omni.fabric.plugin] Attempting to set an invalid data source to array attribute
+
+2026-05-28T17:18:56Z [144,761ms] [Warning] [omni.kit.material.library.material_extensions] Could not initialize context menu integration: No module named 'omni.kit.context_menu'
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

@@ -1,0 +1,62 @@
+# cmd: /home/horde/dev/IsaacLab-fork/isaaclab.sh -p /home/horde/dev/IsaacLab-fork/scripts/benchmarks/benchmark_non_rl.py --benchmark_backend json --output_path /home/horde/dev/IsaacLab-fork/tools/perf_smoke/exploration_matrix/output/factory_physx_n2048/warm_round1 --task Isaac-Factory-GearMesh-Direct-v0 --num_envs 2048 --num_frames 500 --headless --seed 42
+
+The '--headless' CLI argument is deprecated. Omit '--viz' for default headless. If config visualizers are enabled and you want to force headless, use '--viz none'.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1780367203.934907  709933 descriptor_database.cc:633] File already exists in database: grpc/health/v1/health.proto
+W0000 00:00:1780367203.935002  709933 message.cc:301] Protobuf GeneratedMessageFactory: File is already registered: grpc/health/v1/health.proto
+[ISAACLAB] AppLauncher initialization complete
+Loading user config located at: '/home/horde/dev/IsaacLab-fork/.venv/lib/python3.12/site-packages/isaacsim/kit/data/Kit/IsaacLab/3.0/user.config.json'
+2026-06-02T02:26:43Z [0ms] [Warning] [omni.ext.plugin] [ext: isaaclab_visualizers] Extensions config 'extension.toml' doesn't exist '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers' or '/home/horde/dev/IsaacLab-fork/source/isaaclab_visualizers/config'
+2026-06-02T02:26:44Z [333ms] [Warning] [omni.platforminfo.plugin] failed to open the default display.  Can't verify X Server version.
+2026-06-02T02:26:44Z [361ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 550.127.05    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA L40S                      | Yes: 0 |     | 49386   MB | 10de      | 0          |
+|     |                                  |        |     |            | 26b9      | a5333911.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 5.15.0-131-generic
+| Processor: Intel Xeon Processor (Icelake)
+| Cores: 16 | Logical Cores: 16
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64297 | Free Memory: 59173
+| Total Page/Swap (MB): 4095 | Free Page/Swap: 4071
+|---------------------------------------------------------------------------------------------|
+2026-06-02T02:26:46Z [2,581ms] [Warning] [usdrt.population.plugin] Last global time was not created. Did you call setEnableUsdNoticeHandling?
+2026-06-02T02:26:47Z [3,966ms] [Warning] [isaaclab_physx.physics.physx_manager] TGS solver with enable_external_forces_every_iteration=False may cause noisy velocities.
+2026-06-02T02:26:47Z [3,969ms] [Warning] [isaaclab.envs.direct_rl_env] The render interval (1) is smaller than the decimation (8). Multiple render calls will happen for each environment step.If this is not intended, set the render interval to be equal to the decimation.
+2026-06-02T02:27:08Z [24,828ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 285687312 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:09Z [25,826ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 382024944 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:10Z [27,040ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 319261112 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:11Z [27,491ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 324659624 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:11Z [27,957ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 329998160 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:12Z [28,417ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 335168248 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:27:12Z [28,878ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 340401224 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:09Z [446,075ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 274400728 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:20Z [456,846ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 422815248 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:21Z [457,619ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 316914336 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:21Z [458,101ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 322828832 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:22Z [458,582ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 328236360 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:22Z [459,091ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 333738472 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+2026-06-02T02:34:23Z [459,564ms] [Error] [omni.physx.plugin] PhysX error: PxGpuDynamicsMemoryConfig::collisionStackSize buffer overflow detected, please increase its size to at least 338972856 in the scene desc! Contacts have been dropped.
+, FILE /builds/omniverse/physics/physx/source/gpunarrowphase/src/PxgNarrowphaseCore.cpp, LINE 1662
+[INFO] Using Python: "/home/horde/dev/IsaacLab-fork/env_isaaclab/bin/python"

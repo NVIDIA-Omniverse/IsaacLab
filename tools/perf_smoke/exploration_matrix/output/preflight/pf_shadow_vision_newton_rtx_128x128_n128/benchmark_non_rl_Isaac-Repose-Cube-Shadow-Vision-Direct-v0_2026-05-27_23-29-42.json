@@ -1,0 +1,102 @@
+{
+    "benchmark_info": {
+        "phase": "benchmark_info",
+        "workflow_name": "benchmark_non_rl",
+        "timestamp": "2026-05-27T23:29:42.706629",
+        "task": "Isaac-Repose-Cube-Shadow-Vision-Direct-v0",
+        "seed": 42,
+        "num_envs": 128,
+        "num_frames": 10,
+        "presets": "newton_mjwarp,isaacsim_rtx_renderer"
+    },
+    "startup": {
+        "phase": "startup",
+        "workflow_name": "benchmark_non_rl",
+        "App Launch Time": 9973.230358,
+        "Python Imports Time": 384.325411,
+        "Task Creation and Start Time": 15351.158112,
+        "Scene Creation Time": 2470.975602976978,
+        "Simulation Start Time": 6041.573100956157,
+        "Total Start Time (Launch to Train)": 25324.418068
+    },
+    "runtime": {
+        "phase": "runtime",
+        "workflow_name": "benchmark_non_rl",
+        "Min Environment step times": 87.577615,
+        "Max Environment step times": 2947.101671,
+        "Mean Environment step times": 545.5341734,
+        "Min Environment step FPS": 0.3393164239429458,
+        "Max Environment step FPS": 11.418442943439372,
+        "Mean Environment step FPS": 6.675066514949949,
+        "Min Environment step effective FPS": 43.432502264697064,
+        "Max Environment step effective FPS": 1461.5606967602396,
+        "Mean Environment step effective FPS": 854.4085139135934,
+        "CPU Utilization": 192.0666666666667,
+        "CPU Utilization std": 115.77372183128027,
+        "CPU Utilization n": 6,
+        "GPU Memory Used": 6.6,
+        "GPU Memory Used std": 0.11,
+        "GPU Memory Used n": 6,
+        "GPU Utilization": 10.5,
+        "GPU Utilization std": 15.0,
+        "GPU Utilization n": 6,
+        "System Memory RSS": 6.09,
+        "System Memory RSS std": 0.08,
+        "System Memory RSS n": 6,
+        "System Memory VMS": 252.46,
+        "System Memory VMS std": 49.17,
+        "System Memory VMS n": 6,
+        "System Memory USS": 6.07,
+        "System Memory USS std": 0.08,
+        "System Memory USS n": 6
+    },
+    "hardware_info": {
+        "phase": "hardware_info",
+        "workflow_name": "benchmark_non_rl",
+        "cpu_name": "Intel Xeon Processor (Icelake)",
+        "physical_cores": 16,
+        "gpu_device_count": 1,
+        "gpu_current_device": 0,
+        "cuda_version": "12.8",
+        "gpu_devices": {
+            "0": {
+                "name": "NVIDIA L40S",
+                "total_memory_gb": 47.5,
+                "compute_capability": "8.9",
+                "multi_processor_count": 142
+            }
+        },
+        "total_ram_gb": 62.79
+    },
+    "version_info": {
+        "phase": "version_info",
+        "workflow_name": "benchmark_non_rl",
+        "isaaclab_version": "6.1.0",
+        "warp_version": "1.12.1",
+        "torch_version": "2.10.0+cu128",
+        "numpy_version": "2.3.1",
+        "isaaclab_newton_version": "0.13.0",
+        "isaaclab_physx_version": "1.1.0",
+        "isaaclab_ov_version": "0.4.0",
+        "isaaclab_tasks_version": "1.10.1",
+        "isaaclab_rl_version": "0.5.2",
+        "newton_version": "1.2.0",
+        "mujoco_version": "3.8.1",
+        "mujoco_warp_version": "3.8.1",
+        "rl_games_version": "1.6.1",
+        "rsl_rl_version": "5.0.1",
+        "stable_baselines3_version": "2.9.0a2",
+        "skrl_version": "2.1.0",
+        "gymnasium_version": "1.2.1",
+        "cuda_bindings_version": "12.9.4",
+        "usd_core_version": "25.11",
+        "isaaclab_release_version": "3.0.0",
+        "dev": {
+            "commit_hash": "482d21c936b863e323f0a135c8e8e8e8a9c166b2",
+            "commit_hash_short": "482d21c9",
+            "branch": "neilm/perf-smoke-gate",
+            "commit_date": "2026-05-21 14:43:26 -0400",
+            "dirty": true
+        }
+    }
+}
