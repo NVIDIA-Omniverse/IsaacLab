@@ -1,0 +1,408 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Performance Regression Gate
+#
+# Runs a matrix of benchmark tasks on self-hosted runners, compares
+# results to the rolling baseline in angehu/perf-baselines, and posts a verdict
+# table to the job summary.  Non-blocking by default (gate_config.json).
+#
+# Architecture:
+#   config   → load isaacsim version from config.yaml (ubuntu-latest)
+#   bench    → per-task/backend matrix, each pulling the CI image and running
+#              benchmark_non_rl.py inside Docker  (self-hosted, gpu)
+#   aggregate → download all bench artifacts, run oracle, update baselines
+#              (self-hosted, gpu)
+#
+# Baseline updates are pushed to angehu/perf-baselines only from main, 
+# develop, release or angehu/perf-gate-poc branches.
+#
+# backend_key: "{physics_backend}_{render_backend}" when render_backend is
+# set, otherwise just physics_backend.  Matches TaskConfig.backend_key.
+# TODO: replace angehu/perf-baselines w/ real branch name
+
+name: Performance Regression Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop, 'release/**']
+  workflow_dispatch:
+
+concurrency:
+  group: perf-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CI_IMAGE_TAG: >-
+    isaac-lab-ci:${{
+      github.event_name == 'pull_request'
+      && format('pr-{0}', github.event.pull_request.number)
+      || github.ref_name
+    }}-${{ github.sha }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Load shared image config (matches build.yaml pattern)
+  # ---------------------------------------------------------------------------
+  config:
+    name: Load Config
+    runs-on: ubuntu-latest
+    outputs:
+      isaacsim_image_name: ${{ steps.load.outputs.isaacsim_image_name }}
+      isaacsim_image_tag: ${{ steps.load.outputs.isaacsim_image_tag }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        sparse-checkout:
+          - .github/workflows/config.yaml
+          - tools/perf_regression_gate/tasks.json
+          - tools/perf_regression_gate/task_config.py
+        sparse-checkout-cone-mode: false
+    - id: load
+      run: |
+        set -euo pipefail
+        f=.github/workflows/config.yaml
+        echo "isaacsim_image_name=$(yq -r .isaacsim_image_name "$f")" >> "$GITHUB_OUTPUT"
+        echo "isaacsim_image_tag=$(yq -r .isaacsim_image_tag "$f")" >> "$GITHUB_OUTPUT"
+    - id: build_matrix
+      run: |
+        set -euo pipefail
+        MATRIX=$(python3 tools/perf_regression_gate/tasks_to_ci_matrix.py)
+        echo "bench_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Per-task/backend benchmark jobs
+  # ---------------------------------------------------------------------------
+  bench:
+    name: Bench / ${{ matrix.task_id }} / ${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}
+    runs-on: [self-hosted, gpu]
+    needs: [config]
+    continue-on-error: true
+    timeout-minutes: ${{ matrix.job_timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Load the benchmark matrix from the canonical tasks.json task definition file.
+        include: ${{ fromJson(needs.config.outputs.bench_matrix) }}
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+        lfs: true
+
+    # Pull the CI image built (or cached) by the build workflow for this commit.
+    # ecr-build-push-pull will build the image if it is not already in ECR.
+    - name: Pull CI image
+      uses: ./.github/actions/ecr-build-push-pull
+      with:
+        image-tag: ${{ env.CI_IMAGE_TAG }}
+        isaacsim-base-image: ${{ needs.config.outputs.isaacsim_image_name }}
+        isaacsim-version: ${{ needs.config.outputs.isaacsim_image_tag }}
+        dockerfile-path: docker/Dockerfile.base
+        cache-tag: cache-base
+
+    - name: Run benchmark in Docker
+      id: bench_run
+      run: |
+        set -euo pipefail
+        TASK_ID="${{ matrix.task_id }}"
+        PHYSICS_BACKEND="${{ matrix.physics_backend }}"
+        RENDER_BACKEND="${{ matrix.render_backend }}"
+
+        # Compute backend_key: "{physics}_{render}" when render is set, else "{physics}"
+        if [ -n "${RENDER_BACKEND}" ]; then
+          BACKEND_KEY="${PHYSICS_BACKEND}_${RENDER_BACKEND}"
+        else
+          BACKEND_KEY="${PHYSICS_BACKEND}"
+        fi
+
+        ARTIFACT_DIR="$(pwd)/artifacts/${TASK_ID}/${BACKEND_KEY}"
+
+        # Sanitize task_id and backend_key for Docker container name
+        SAFE_TASK_ID="${TASK_ID//[^a-zA-Z0-9]/-}"
+        SAFE_BACKEND="${BACKEND_KEY//[^a-zA-Z0-9]/-}"
+        CONTAINER_NAME="perf-bench-${SAFE_TASK_ID}-${SAFE_BACKEND}-${{ github.run_id }}"
+        LOG_FILE="${ARTIFACT_DIR}/benchmark.log"
+
+        mkdir -p "${ARTIFACT_DIR}"
+
+        # Remove any stale container from a previous run attempt
+        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+        # Build optional render backend preset token for the CLI.
+        # benchmark_non_rl.py accepts Hydra-style preset tokens (no leading dashes).
+        # Physics is selected via the sim_backend token; render via renderer= token.
+        # TODO: Update these tokens once benchmark_non_rl.py CLI flags are finalised.
+        PRESET_TOKENS=""
+        if [ -n "${RENDER_BACKEND}" ]; then
+          PRESET_TOKENS="renderer=${RENDER_BACKEND}"
+        fi
+
+        # Start the benchmark container in detached mode
+        docker run -d --name "${CONTAINER_NAME}" \
+          --init --stop-timeout 10 \
+          --entrypoint bash --gpus all --network=host \
+          --security-opt=no-new-privileges:true \
+          --ulimit nofile=65536:65536 \
+          --ulimit nproc=4096:4096 \
+          -e OMNI_KIT_ACCEPT_EULA=yes \
+          -e ACCEPT_EULA=Y \
+          -e OMNI_KIT_DISABLE_CUP=1 \
+          -e ISAAC_SIM_HEADLESS=1 \
+          -e PYTHONUNBUFFERED=1 \
+          -v "${ARTIFACT_DIR}:/tmp/bench_out" \
+          "${{ env.CI_IMAGE_TAG }}" \
+          -c "
+            set -e
+            cd /workspace/isaaclab
+            rm -f _isaac_sim
+            ln -s /isaac-sim _isaac_sim
+            ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py \
+              --task '${TASK_ID}' \
+              --num_envs ${{ matrix.num_envs }} \
+              --num_frames ${{ matrix.num_frames }} \
+              --benchmark_backend json \
+              --output_path /tmp/bench_out \
+              ${PRESET_TOKENS}
+          "
+
+        START=$(date +%s)
+
+        # Stream container logs to file and terminal while benchmark runs
+        docker logs -f "${CONTAINER_NAME}" 2>&1 | tee "${LOG_FILE}" &
+        LOGS_PID=$!
+
+        # Wait for the container to exit, with a hard wall-clock timeout
+        BENCH_EXIT=1
+        if docker_exit=$(timeout ${{ matrix.bench_timeout_s }} docker wait "${CONTAINER_NAME}" 2>/dev/null); then
+          BENCH_EXIT="${docker_exit:-1}"
+        else
+          echo "::warning::Benchmark for ${TASK_ID}/${BACKEND_KEY} timed out after ${{ matrix.bench_timeout_s }}s"
+        fi
+
+        END=$(date +%s)
+        WALL_TIME_S=$((END - START))
+
+        kill "${LOGS_PID}" 2>/dev/null || true
+        wait "${LOGS_PID}" 2>/dev/null || true
+
+        docker kill "${CONTAINER_NAME}" 2>/dev/null || true
+        docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+
+        echo "exit_code=${BENCH_EXIT}" >> "$GITHUB_OUTPUT"
+        echo "wall_time_s=${WALL_TIME_S}" >> "$GITHUB_OUTPUT"
+        echo "artifact_dir=${ARTIFACT_DIR}" >> "$GITHUB_OUTPUT"
+        echo "backend_key=${BACKEND_KEY}" >> "$GITHUB_OUTPUT"
+
+    # Retry once on first-attempt failure before giving up.
+    # Runs only when bench_run reports a non-zero exit code.
+    - name: Retry benchmark on failure
+      id: bench_retry
+      if: always() && steps.bench_run.outputs.exit_code != '0' && steps.bench_run.outputs.exit_code != ''
+      run: |
+        set -uo pipefail
+        TASK_ID="${{ matrix.task_id }}"
+        PHYSICS_BACKEND="${{ matrix.physics_backend }}"
+        RENDER_BACKEND="${{ matrix.render_backend }}"
+
+        if [ -n "${RENDER_BACKEND}" ]; then
+          BACKEND_KEY="${PHYSICS_BACKEND}_${RENDER_BACKEND}"
+        else
+          BACKEND_KEY="${PHYSICS_BACKEND}"
+        fi
+
+        ARTIFACT_DIR="$(pwd)/artifacts/${TASK_ID}/${BACKEND_KEY}"
+        SAFE_TASK_ID="${TASK_ID//[^a-zA-Z0-9]/-}"
+        SAFE_BACKEND="${BACKEND_KEY//[^a-zA-Z0-9]/-}"
+        CONTAINER_NAME="perf-bench-${SAFE_TASK_ID}-${SAFE_BACKEND}-${{ github.run_id }}-retry"
+        LOG_FILE="${ARTIFACT_DIR}/benchmark.log"
+
+        echo "::notice::First attempt failed (exit=${{ steps.bench_run.outputs.exit_code }}); retrying benchmark for ${TASK_ID}/${BACKEND_KEY}"
+
+        # Remove any partial perf output from the failed first attempt so the retry's
+        # output is picked up cleanly by build_bench_result's normalize step.
+        rm -f "${ARTIFACT_DIR}/perf_regression_gate_info.json"
+
+        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+        PRESET_TOKENS=""
+        if [ -n "${RENDER_BACKEND}" ]; then
+          PRESET_TOKENS="renderer=${RENDER_BACKEND}"
+        fi
+
+        docker run -d --name "${CONTAINER_NAME}" \
+          --init --stop-timeout 10 \
+          --entrypoint bash --gpus all --network=host \
+          --security-opt=no-new-privileges:true \
+          --ulimit nofile=65536:65536 \
+          --ulimit nproc=4096:4096 \
+          -e OMNI_KIT_ACCEPT_EULA=yes \
+          -e ACCEPT_EULA=Y \
+          -e OMNI_KIT_DISABLE_CUP=1 \
+          -e ISAAC_SIM_HEADLESS=1 \
+          -e PYTHONUNBUFFERED=1 \
+          -v "${ARTIFACT_DIR}:/tmp/bench_out" \
+          "${{ env.CI_IMAGE_TAG }}" \
+          -c "
+            set -e
+            cd /workspace/isaaclab
+            rm -f _isaac_sim
+            ln -s /isaac-sim _isaac_sim
+            ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py \
+              --task '${TASK_ID}' \
+              --num_envs ${{ matrix.num_envs }} \
+              --num_frames ${{ matrix.num_frames }} \
+              --benchmark_backend json \
+              --output_path /tmp/bench_out \
+              ${PRESET_TOKENS}
+          "
+
+        START=$(date +%s)
+
+        docker logs -f "${CONTAINER_NAME}" 2>&1 | tee "${LOG_FILE}" &
+        LOGS_PID=$!
+
+        BENCH_EXIT=1
+        if docker_exit=$(timeout ${{ matrix.bench_timeout_s }} docker wait "${CONTAINER_NAME}" 2>/dev/null); then
+          BENCH_EXIT="${docker_exit:-1}"
+        else
+          echo "::warning::Retry benchmark for ${TASK_ID}/${BACKEND_KEY} timed out after ${{ matrix.bench_timeout_s }}s"
+        fi
+
+        END=$(date +%s)
+        WALL_TIME_S=$((END - START))
+
+        kill "${LOGS_PID}" 2>/dev/null || true
+        wait "${LOGS_PID}" 2>/dev/null || true
+
+        docker kill "${CONTAINER_NAME}" 2>/dev/null || true
+        docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+
+        echo "exit_code=${BENCH_EXIT}" >> "$GITHUB_OUTPUT"
+        echo "wall_time_s=${WALL_TIME_S}" >> "$GITHUB_OUTPUT"
+
+    # Build bench_result.json from the Docker run outputs.
+    # Runs even when bench_run/bench_retry fail so partial results are always uploaded.
+    # Uses the retry's exit code and wall time when a retry ran, and sets was_retried accordingly.
+    - name: Build bench_result
+      if: always()
+      run: |
+        TASK_ID="${{ matrix.task_id }}"
+        PHYSICS_BACKEND="${{ matrix.physics_backend }}"
+        RENDER_BACKEND="${{ matrix.render_backend }}"
+        if [ -n "${RENDER_BACKEND}" ]; then
+          BACKEND_KEY="${PHYSICS_BACKEND}_${RENDER_BACKEND}"
+        else
+          BACKEND_KEY="${PHYSICS_BACKEND}"
+        fi
+        ARTIFACT_DIR="$(pwd)/artifacts/${TASK_ID}/${BACKEND_KEY}"
+
+        # If a retry ran, use its exit code/wall time and mark was_retried.
+        RETRY_EXIT="${{ steps.bench_retry.outputs.exit_code }}"
+        if [ -n "${RETRY_EXIT}" ]; then
+          FINAL_EXIT="${RETRY_EXIT}"
+          FINAL_WALL="${{ steps.bench_retry.outputs.wall_time_s || '0' }}"
+          EXTRA_FLAGS="--was_retried --attempt 2"
+        else
+          FINAL_EXIT="${{ steps.bench_run.outputs.exit_code || '1' }}"
+          FINAL_WALL="${{ steps.bench_run.outputs.wall_time_s || '0' }}"
+          EXTRA_FLAGS=""
+        fi
+
+        python3 tools/perf_regression_gate/build_bench_result.py \
+          --task_id "${TASK_ID}" \
+          --physics_backend "${PHYSICS_BACKEND}" \
+          --render_backend "${RENDER_BACKEND}" \
+          --artifact_dir "${ARTIFACT_DIR}" \
+          --exit_code "${FINAL_EXIT}" \
+          --wall_time_s "${FINAL_WALL}" \
+          --timeout_s "${{ matrix.bench_timeout_s }}" \
+          --log_file "${ARTIFACT_DIR}/benchmark.log" \
+          ${EXTRA_FLAGS}
+
+    - name: Upload bench artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: bench-${{ matrix.task_id }}-${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}-${{ github.run_id }}
+        path: artifacts/${{ matrix.task_id }}/${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}/
+        retention-days: 7
+        if-no-files-found: warn
+
+    # Force-clean the container if the job is cancelled mid-run
+    - name: Cleanup container on cancellation
+      if: cancelled()
+      run: |
+        TASK_ID="${{ matrix.task_id }}"
+        PHYSICS_BACKEND="${{ matrix.physics_backend }}"
+        RENDER_BACKEND="${{ matrix.render_backend }}"
+        if [ -n "${RENDER_BACKEND}" ]; then
+          BACKEND_KEY="${PHYSICS_BACKEND}_${RENDER_BACKEND}"
+        else
+          BACKEND_KEY="${PHYSICS_BACKEND}"
+        fi
+        SAFE_TASK_ID="${TASK_ID//[^a-zA-Z0-9]/-}"
+        SAFE_BACKEND="${BACKEND_KEY//[^a-zA-Z0-9]/-}"
+        CONTAINER_NAME="perf-bench-${SAFE_TASK_ID}-${SAFE_BACKEND}-${{ github.run_id }}"
+        docker kill "${CONTAINER_NAME}" 2>/dev/null || true
+        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  # Aggregate: oracle verdicts, baseline update, step summary
+  # ---------------------------------------------------------------------------
+  aggregate:
+    name: Aggregate + Verdict
+    runs-on: [self-hosted, gpu]
+    needs: [bench]
+    # Always run even when some bench jobs fail or are skipped
+    if: always()
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    # Create a local branch so _baseline_worktree can commit to it
+    - name: Fetch baselines branch
+      run: |
+        git fetch origin angehu/perf-baselines:angehu/perf-baselines || \
+          echo "::warning::Baseline branch not found; gate will run as a seed run (no baseline comparison)"
+
+    - name: Download bench artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: bench-*-${{ github.run_id }}
+        path: artifacts/
+        merge-multiple: false
+
+    - name: Run aggregate oracle
+      id: aggregate
+      run: |
+        ALLOW_UPDATE="false"
+        if [[ "${{ github.ref }}" == "refs/heads/develop" || \
+              "${{ github.ref }}" == "refs/heads/angehu/perf-gate-poc" ]]; then
+          ALLOW_UPDATE="true"
+        fi
+        python3 tools/perf_regression_gate/aggregate.py \
+          --artifacts_dir artifacts/ \
+          --gpu_model L40S \
+          --gate_config tools/perf_regression_gate/gate_config.json \
+          --baseline_branch angehu/perf-baselines \
+          --allow_baseline_update "${ALLOW_UPDATE}" \
+          --summary_file "${GITHUB_STEP_SUMMARY}"
+
+    # Push baseline updates only from eligible branches
+    - name: Push baseline updates
+      if: steps.aggregate.outputs.baselines_updated == 'true'
+      run: |
+        git push origin angehu/perf-baselines
