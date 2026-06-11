@@ -1,0 +1,211 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Perf Smoke Gate
+
+# -----------------------------------------------------------------------------
+# Phase 1 fork trial on NVIDIA's *shared* self-hosted GPU fleet (arm64 L40S).
+#
+# Those runners do NOT run `pull_request`-triggered workflows (ProdSec rule).
+# copy-pr-bot (.github/copy-pr-bot.yaml) mirrors a vetted PR onto a
+# `pull-request/<N>` branch; we trigger on `push` to that branch. The mirrored
+# SHA equals the PR HEAD SHA, so statuses report back onto the PR.
+#
+# NOTE (upstream variant): IsaacLab's own GPU CI (build.yaml) instead triggers
+# on `pull_request` with generic `[self-hosted, gpu]` labels and runs tests in
+# an ECR-built container. If/when this gate is promoted into the official repo,
+# switch the trigger + `runs-on` to match build.yaml. This file targets the
+# shared arm64 fleet because that is what the trial has access to.
+# -----------------------------------------------------------------------------
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: 'Space-separated gate task names (default: all baseline.json tasks).'
+        required: false
+        default: ''
+      cache_dir:
+        description: 'Optional persistent dir for the warm JIT-cache sidecar (empty = cold run).'
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write  # post the per-task gate verdict back onto the PR head commit
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Emit the task matrix from baseline.json (single source of truth) so the
+  # matrix can never drift from the calibrated tasks. Runs on a cheap GitHub-
+  # hosted runner; arch-independent.
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Build Task Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      tasks: ${{ steps.tasks.outputs.tasks }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          fetch-depth: 1
+          sparse-checkout: tools/perf_smoke/baseline.json
+          sparse-checkout-cone-mode: false
+
+      - id: tasks
+        env:
+          DISPATCH_TASKS: ${{ github.event_name == 'workflow_dispatch' && inputs.tasks || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DISPATCH_TASKS}" ]; then
+            tasks_json="$(printf '%s\n' ${DISPATCH_TASKS} | jq -R . | jq -cs .)"
+          else
+            tasks_json="$(jq -c '[keys[] | select(startswith("_") | not)]' tools/perf_smoke/baseline.json)"
+          fi
+          echo "tasks=$tasks_json" >> "$GITHUB_OUTPUT"
+          echo "Matrix tasks: $tasks_json"
+
+  # ---------------------------------------------------------------------------
+  # Comparator logic tests. Pure stdlib unittest -- no GPU, no Isaac Sim, and
+  # arch-independent -- so this validates the PASS/WARN/BLOCK verdict logic on
+  # every trigger and gives fast signal before the GPU job is scheduled.
+  # ---------------------------------------------------------------------------
+  comparator-unit-tests:
+    name: Comparator Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Run comparator unittest suite
+        run: python3 tools/perf_smoke/test_check_perf_regression.py
+
+  # ---------------------------------------------------------------------------
+  # The GPU gate. One job PER TASK (matrix from baseline.json): each task is its
+  # own check, parallelizing across the pool, and re-runnable in isolation.
+  # pytest orchestrates (D1) -- shells out the benchmark as its own Isaac Sim
+  # subprocess, then runs the comparator. Advisory (continue-on-error) for the
+  # fork trial; flip to required once cross-runner variance is confirmed.
+  #
+  # Runs on the shared arm64 L40S fleet. The aarch64 Isaac Sim stack is
+  # supported (see docs/source/setup/installation/pip_installation.rst) but two
+  # deps (imgui-bundle, nlopt) build from source on arm64, hence the dev headers
+  # installed below -- mirroring docker/Dockerfile.base's arm64 branch.
+  # ---------------------------------------------------------------------------
+  perf-gate:
+    name: Perf Gate (${{ matrix.task }})
+    needs: [setup]
+    runs-on: linux-arm64-gpu-l40s-latest-1
+    timeout-minutes: 60
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJSON(needs.setup.outputs.tasks) }}
+    env:
+      GATE_CACHE_DIR: ${{ github.event_name == 'workflow_dispatch' && inputs.cache_dir || '' }}
+      # arm64 Isaac Sim runtime requirements (verified on the L40S dev box):
+      #  - libgomp must be preloaded or the benchmark aborts before launch
+      #    (documented aarch64 workaround, docs/.../pip_installation.rst).
+      #  - kit's EULA prompt is non-interactive under CI; accept it up front.
+      LD_PRELOAD: /lib/aarch64-linux-gnu/libgomp.so.1
+      OMNI_KIT_ACCEPT_EULA: "YES"
+    steps:
+      # Recover PR metadata from the mirrored commit so check statuses associate
+      # with the originating PR. Required on the shared fleet's push model.
+      # TODO(bringup): these two nv-gha-runners actions still need repo-admin
+      # allowlist approval. Pinned to main@<sha> below (no release tags exist).
+      - name: Get PR info
+        uses: nv-gha-runners/get-pr-info@090577647b8ddc4e06e809e264f7881650ecdccf  # main
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          lfs: true
+
+      # Routes pip/apt through NVIDIA's internal proxy (runners have no public
+      # network). TODO(bringup): allowlist as above.
+      - name: Setup proxy cache
+        uses: nv-gha-runners/setup-proxy-cache@14229018fe157c83e03c008f27d183d8e99bc67c  # main
+
+      # arm64-only build deps for imgui-bundle / nlopt (no prebuilt aarch64
+      # wheels). Mirrors docker/Dockerfile.base. Assumes the runner grants apt;
+      # if it does not, switch this job to run inside the arm64 isaac-lab
+      # container instead (see tools/perf_smoke/RUNNER_BRINGUP.md).
+      - name: Install arm64 build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3.12-dev libgl1-mesa-dev libopengl-dev libglx-dev \
+            libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev swig
+
+      - name: Install Isaac Lab
+        run: ./isaaclab.sh --install
+
+      # Re-expose pre-1.13 Warp internals so omni.replicator.core (RTX/camera
+      # path) imports under Warp >=1.13. Idempotent; arch-independent.
+      - name: Install Warp/replicator compatibility shim
+        run: ./isaaclab.sh -p tools/perf_smoke/warp_replicator_shim.py --check || ./isaaclab.sh -p tools/perf_smoke/warp_replicator_shim.py
+
+      - name: Verify GPU availability
+        run: |
+          echo "=== GPU Info ==="
+          nvidia-smi --query-gpu=index,name,driver_version --format=csv
+          GPU_COUNT=$(./isaaclab.sh -p -c "import torch; print(torch.cuda.device_count())")
+          echo "Detected $GPU_COUNT GPU(s)"
+          if [ "$GPU_COUNT" -lt 1 ]; then
+            echo "::error::Perf gate requires a GPU, found $GPU_COUNT"
+            exit 1
+          fi
+
+      # pytest orchestrates: one parametrized test for this task, shelled out as
+      # its own Isaac Sim subprocess, then the comparator. Judged against the
+      # rolling-window store (tools/perf_smoke/perf_history) + in-tree overrides.
+      # BLOCK fails the test; WARN/PASS pass.
+      - name: Run perf gate
+        id: gate
+        env:
+          GATE_RUN: "1"
+          GATE_TASKS: ${{ matrix.task }}
+          GATE_OUTPUT_DIR: ${{ github.workspace }}/perf-output
+        run: ./isaaclab.sh -p -m pytest -v tools/perf_smoke/test_perf_gate.py
+
+      - name: Upload gate output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-gate-output-${{ github.run_id }}-${{ strategy.job-index }}
+          path: perf-output/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Surface the verdict on the PR head commit. On the shared fleet's push
+      # model, github.sha equals the PR HEAD (copy-pr-bot mirrors it), so a
+      # per-task status here shows up as its own check on the originating PR.
+      # One context per matrix task keeps tasks independently visible.
+      - name: Report perf gate status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ok = '${{ steps.gate.outcome }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: ok ? 'success' : 'failure',
+              context: `perf-gate (${{ matrix.task }})`,
+              description: ok
+                ? 'No perf regression detected'
+                : 'Perf gate failed (BLOCK or benchmark error) — see artifact',
+            });

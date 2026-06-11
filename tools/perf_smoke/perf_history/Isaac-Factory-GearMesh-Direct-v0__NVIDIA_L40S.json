@@ -1,0 +1,40 @@
+{
+  "task": "Isaac-Factory-GearMesh-Direct-v0",
+  "gpu": "NVIDIA L40S",
+  "num_frames": 300,
+  "warmup_frames": 2,
+  "window": 20,
+  "_note": "Seeded from L40S warm calibration runs (500f truncated to 300f, post-warm-up).",
+  "samples": [
+    {
+      "fps": 872.1,
+      "wall_s": 319.13,
+      "source": "factory_physx_n512/warm_round1",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 890.0,
+      "wall_s": 314.54,
+      "source": "factory_physx_n512/warm_round2",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 869.8,
+      "wall_s": 322.08,
+      "source": "factory_physx_n512/warm_round3",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 890.7,
+      "wall_s": 314.0,
+      "source": "factory_physx_n512/warm_round4",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 890.3,
+      "wall_s": 313.48,
+      "source": "factory_physx_n512/warm_round5",
+      "ts": "2026-06-10T00:49:53+00:00"
+    }
+  ]
+}

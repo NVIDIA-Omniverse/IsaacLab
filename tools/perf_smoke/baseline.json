@@ -1,0 +1,134 @@
+{
+    "_schema_version": 3,
+    "_notes": [
+        "Phase 1 perf-smoke gate config + static fallback (4-task subset). Implements",
+        "ci-regression-gate-config-info.md.",
+        "ROLE OF THIS FILE: (1) the run config each task is launched with (num_envs, num_frames, seed,",
+        "benchmark_args, warmup_frames) -- read by the gate so a measurement is always taken under the",
+        "config the window was calibrated with; (2) a STATIC FALLBACK (baseline_fps + warn_pct/",
+        "max_regression_pct) used only when the rolling-window history store has < 3 samples.",
+        "THRESHOLDS (normal path): computed at test time from a rolling window via median+MAD (see",
+        "check_perf_regression.py and the perf_history/ store -- the orphan-branch stand-in). Manual",
+        "overrides live in baseline_overrides.json (committed with the PR), NOT here and NOT in the window.",
+        "D6 warm-up exclusion: the gating KPI is the mean post-warm-up effective FPS -- the first",
+        "warmup_frames are dropped (2 for PhysX tasks; 60 for shadow-vision to clear the camera/JIT window).",
+        "VARIANTS: a key may be a gym id (e.g. 'Isaac-Cartpole-v0', the PhysX default) or a variant",
+        "'<gym id>@<backend>' (e.g. 'Isaac-Cartpole-v0@newton') carrying its own 'task_id' (the real gym",
+        "task the benchmark is launched with) and benchmark_args. Newton uses physics=newton_mjwarp and a",
+        "5-frame warm-up (JIT). Output/history are keyed by the full variant key so PhysX and Newton don't collide.",
+        "Gate config: NVIDIA L40S, WARM runs/task, num_frames=300, seed=42.",
+        "Fallback values were derived from the existing warm L40S runs (500f truncated to 300f, post-warm-up);",
+        "the perf_history/ window holds the per-run samples. Authoritative re-bless happens on the runner pool.",
+        "Per-GPU keys substring-match hardware_info.gpu_devices[].name ('NVIDIA L40S' matches that device)."
+    ],
+    "Isaac-Cartpole-v0": {
+        "num_envs": 4096,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 2,
+        "benchmark_args": ["physics=physx"],
+        "config_note": "cartpole_physx_n4096",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 115235.8,
+                "warn_pct": 5.0,
+                "max_regression_pct": 10.0,
+                "cv_pct": 2.02,
+                "n_runs": 5
+            }
+        }
+    },
+    "Isaac-Factory-GearMesh-Direct-v0": {
+        "num_envs": 512,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 2,
+        "benchmark_args": [],
+        "config_note": "factory_physx_n512",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 880.5,
+                "warn_pct": 5.0,
+                "max_regression_pct": 10.0,
+                "cv_pct": 1.29,
+                "n_runs": 5
+            }
+        }
+    },
+    "Isaac-Velocity-Flat-G1-v0": {
+        "num_envs": 2048,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 2,
+        "benchmark_args": ["physics=physx"],
+        "config_note": "g1_flat_physx_n2048",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 19213.7,
+                "warn_pct": 5.0,
+                "max_regression_pct": 10.0,
+                "cv_pct": 0.81,
+                "n_runs": 5
+            }
+        }
+    },
+    "Isaac-Cartpole-v0@newton": {
+        "task_id": "Isaac-Cartpole-v0",
+        "num_envs": 4096,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 5,
+        "benchmark_args": ["physics=newton_mjwarp"],
+        "config_note": "cartpole_newton_n4096 (Newton/MJWarp; warm-up 5 frames for JIT)",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 358461.3,
+                "warn_pct": 6.0,
+                "max_regression_pct": 12.0,
+                "cv_pct": 2.9,
+                "n_runs": 5
+            }
+        }
+    },
+    "Isaac-Velocity-Flat-G1-v0@newton": {
+        "task_id": "Isaac-Velocity-Flat-G1-v0",
+        "num_envs": 2048,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 5,
+        "benchmark_args": ["physics=newton_mjwarp"],
+        "config_note": "g1_flat_newton_n2048 (Newton/MJWarp; warm-up 5 frames for JIT)",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 69660.2,
+                "warn_pct": 6.0,
+                "max_regression_pct": 12.0,
+                "cv_pct": 1.9,
+                "n_runs": 5
+            }
+        }
+    },
+    "Isaac-Repose-Cube-Shadow-Vision-Direct-v0": {
+        "num_envs": 128,
+        "num_frames": 300,
+        "seed": 42,
+        "warmup_frames": 60,
+        "benchmark_args": [
+            "--enable_cameras",
+            "physics=physx",
+            "presets=isaacsim_rtx_renderer",
+            "env.tiled_camera.width=64",
+            "env.tiled_camera.height=64"
+        ],
+        "config_note": "shadow_vision_physx_rtx_64x64_n128 (needs the warp/replicator shim)",
+        "per_gpu": {
+            "NVIDIA L40S": {
+                "baseline_fps": 1024.6,
+                "warn_pct": 5.0,
+                "max_regression_pct": 10.0,
+                "cv_pct": 0.86,
+                "n_runs": 5
+            }
+        }
+    }
+}

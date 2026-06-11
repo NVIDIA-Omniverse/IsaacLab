@@ -1,0 +1,94 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Perf Baseline Refresh
+
+# Manual rolling re-baseline: measure each task N times on the current main,
+# recompute the in-tree baseline.json values, and open a REVIEWED PR with the
+# diff. Baselines therefore track recent reality, but every change is a visible,
+# approvable diff -- never a silent auto-commit. The boiling-frog guard in
+# rebaseline.py flags/refuses suspicious downward drift.
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: 'Runs per task in the rolling window.'
+        required: false
+        default: '5'
+      tasks:
+        description: 'Space-separated tasks (default: all baseline.json tasks).'
+        required: false
+        default: ''
+      cache_dir:
+        description: 'Optional warm JIT-cache dir (empty = cold).'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  rebaseline:
+    name: Refresh Perf Baselines
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          lfs: true
+
+      - name: Install Isaac Lab
+        run: ./isaaclab.sh --install
+
+      - name: Install Warp/replicator compatibility shim
+        run: ./isaaclab.sh -p tools/perf_smoke/warp_replicator_shim.py --check || ./isaaclab.sh -p tools/perf_smoke/warp_replicator_shim.py
+
+      - name: Run rolling re-baseline
+        env:
+          R_TASKS: ${{ inputs.tasks }}
+          R_REPEAT: ${{ inputs.repeat }}
+          R_CACHE: ${{ inputs.cache_dir }}
+        run: |
+          set -euo pipefail
+          ARGS="--repeat ${R_REPEAT} --apply --output-dir ${{ github.workspace }}/perf-output-rebaseline"
+          if [ -n "${R_TASKS}" ]; then ARGS="${ARGS} --tasks ${R_TASKS}"; fi
+          if [ -n "${R_CACHE}" ]; then ARGS="${ARGS} --cache-dir ${R_CACHE}"; fi
+          # Capture the report (window stats + guard flags) for the PR body.
+          ./isaaclab.sh -p tools/perf_smoke/rebaseline.py ${ARGS} | tee /tmp/rebaseline_report.txt
+
+      - name: Open re-baseline PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- tools/perf_smoke/baseline.json tools/perf_smoke/perf_history; then
+            echo "No baseline/window changes; nothing to propose."
+            exit 0
+          fi
+          BRANCH="perf/rebaseline-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          # The rolling window (perf_history/) is the primary store; baseline.json
+          # carries the refreshed static fallback. Commit both.
+          git add tools/perf_smoke/baseline.json tools/perf_smoke/perf_history
+          git commit -m "perf: refresh rolling baselines (run ${{ github.run_id }})"
+          git push origin "${BRANCH}"
+          {
+            echo "Automated rolling re-baseline of \`tools/perf_smoke/baseline.json\`."
+            echo
+            echo "Review the window stats and any ⚠️/❌ guard flags below before merging."
+            echo
+            echo '```'
+            cat /tmp/rebaseline_report.txt
+            echo '```'
+          } > /tmp/pr_body.md
+          gh pr create \
+            --title "perf: refresh rolling baselines (run ${{ github.run_id }})" \
+            --body-file /tmp/pr_body.md \
+            --base "${{ github.ref_name }}" \
+            --head "${BRANCH}"

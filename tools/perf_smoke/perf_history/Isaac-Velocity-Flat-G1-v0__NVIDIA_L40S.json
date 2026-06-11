@@ -1,0 +1,40 @@
+{
+  "task": "Isaac-Velocity-Flat-G1-v0",
+  "gpu": "NVIDIA L40S",
+  "num_frames": 300,
+  "warmup_frames": 2,
+  "window": 20,
+  "_note": "Seeded from L40S warm calibration runs (500f truncated to 300f, post-warm-up).",
+  "samples": [
+    {
+      "fps": 19078.1,
+      "wall_s": 99.14,
+      "source": "g1_flat_physx_n2048/warm_round1",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 19263.8,
+      "wall_s": 94.34,
+      "source": "g1_flat_physx_n2048/warm_round2",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 19114.7,
+      "wall_s": 93.81,
+      "source": "g1_flat_physx_n2048/warm_round3",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 19356.8,
+      "wall_s": 94.68,
+      "source": "g1_flat_physx_n2048/warm_round4",
+      "ts": "2026-06-10T00:49:53+00:00"
+    },
+    {
+      "fps": 19481.9,
+      "wall_s": 93.37,
+      "source": "g1_flat_physx_n2048/warm_round5",
+      "ts": "2026-06-10T00:49:53+00:00"
+    }
+  ]
+}
