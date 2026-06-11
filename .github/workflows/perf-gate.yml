@@ -130,7 +130,11 @@ jobs:
         # Only meaningful on the copy-pr-bot push model (recovers PR metadata from
         # the mirrored commit). A manual workflow_dispatch has no originating PR, so
         # skip it there to keep dispatch-triggered trial runs unblocked.
+        # TRIAL: continue-on-error so a manually-pushed pull-request/<N> branch with
+        # no real PR behind it (404) does not abort the run; statuses use github.sha
+        # directly and do not depend on this step's output.
         if: github.event_name == 'push'
+        continue-on-error: true
         uses: nv-gha-runners/get-pr-info@090577647b8ddc4e06e809e264f7881650ecdccf  # main
 
       - name: Checkout
