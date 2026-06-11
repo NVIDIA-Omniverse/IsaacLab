@@ -281,19 +281,20 @@ def _benchmark_info(result: dict) -> dict:
     return info if isinstance(info, dict) else {}
 
 
-def _expected_presets(task_entry: dict) -> list[str]:
-    """Physics/renderer preset tokens the gate launches this task with.
+def _expected_overrides(task_entry: dict, keys: tuple[str, ...]) -> list[str]:
+    """Hydra-override values the gate launches this task with, for the given ``keys``.
 
-    Pulled from the ``physics=`` / ``presets=`` Hydra overrides in ``benchmark_args``
-    (e.g. ``physics=newton_mjwarp`` -> ``newton_mjwarp``). The backend echoes these
-    back, comma-joined, in ``benchmark_info.presets``.
+    Pulled from ``benchmark_args`` (e.g. ``physics=newton_mjwarp`` -> ``newton_mjwarp``;
+    ``presets=physx,rgb`` -> ``physx``, ``rgb``). ``physics=`` and ``presets=`` are
+    distinct Hydra groups echoed back in distinct ``benchmark_info`` fields, so each is
+    extracted independently.
     """
     out: list[str] = []
     for arg in task_entry.get("benchmark_args", []) or []:
         if isinstance(arg, str) and "=" in arg:
             key, _, val = arg.partition("=")
-            if key in ("physics", "presets") and val:
-                out.append(val)
+            if key in keys and val:
+                out.extend(v.strip() for v in val.split(",") if v.strip())
     return out
 
 
@@ -326,10 +327,18 @@ def _assert_run_config(result: dict, task: str, task_entry: dict) -> None:
     got_frames = info.get("num_frames")
     if want_frames is not None and isinstance(got_frames, (int, float)) and int(got_frames) < int(want_frames):
         mismatches.append(f"num_frames(ran={int(got_frames)},want>={int(want_frames)})")
-    # Physics/renderer backend: every physics=/presets= override we launch with must
-    # appear in the run's reported presets. Catches "ran PhysX when the @newton variant
-    # was intended" -- a different KPI entirely, invisible to an FPS-only check.
-    want_presets = _expected_presets(task_entry)
+    # Physics backend: the physics= override we launch with must match the run's
+    # reported backend (benchmark_info.physics). Catches "ran PhysX when the @newton
+    # variant was intended" -- a different KPI entirely, invisible to an FPS-only check.
+    want_physics = _expected_overrides(task_entry, ("physics",))
+    ran_physics = str(info.get("physics", "")).strip()
+    if want_physics and ran_physics:  # only assert when the backend reported it
+        missing = [p for p in want_physics if p != ran_physics]
+        if missing:
+            mismatches.append(f"physics(ran={ran_physics},want={','.join(want_physics)})")
+    # Renderer/observation presets: every presets= override we launch with must appear
+    # in the run's reported presets (benchmark_info.presets, comma-joined).
+    want_presets = _expected_overrides(task_entry, ("presets",))
     if want_presets:
         ran_presets = {p.strip() for p in str(info.get("presets", "")).split(",") if p.strip()}
         if ran_presets:  # only assert when the backend reported its presets

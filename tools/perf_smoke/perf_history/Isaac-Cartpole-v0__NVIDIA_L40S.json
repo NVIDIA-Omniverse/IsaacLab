@@ -4,37 +4,13 @@
   "num_frames": 300,
   "warmup_frames": 2,
   "window": 20,
-  "_note": "Seeded from L40S warm calibration runs (500f truncated to 300f, post-warm-up).",
+  "_note": "PROVISIONAL single-run local baseline (isaaclab 6.6.1 / warp 1.13.0, L40S dev box). The prior 5-sample window (~115k FPS) was calibrated on an older build and is ~2.4x stale. With <3 samples the comparator uses the baseline.json static fallback; re-record a full window on the runner fleet to restore window-based gating.",
   "samples": [
     {
-      "fps": 115333.6,
-      "wall_s": 37.23,
-      "source": "cartpole_physx_n4096/warm_round1",
-      "ts": "2026-06-10T00:49:53+00:00"
-    },
-    {
-      "fps": 115099.7,
-      "wall_s": 36.72,
-      "source": "cartpole_physx_n4096/warm_round2",
-      "ts": "2026-06-10T00:49:53+00:00"
-    },
-    {
-      "fps": 114419.0,
-      "wall_s": 36.22,
-      "source": "cartpole_physx_n4096/warm_round3",
-      "ts": "2026-06-10T00:49:53+00:00"
-    },
-    {
-      "fps": 114538.0,
-      "wall_s": 37.07,
-      "source": "cartpole_physx_n4096/warm_round4",
-      "ts": "2026-06-10T00:49:53+00:00"
-    },
-    {
-      "fps": 118560.6,
-      "wall_s": 37.07,
-      "source": "cartpole_physx_n4096/warm_round5",
-      "ts": "2026-06-10T00:49:53+00:00"
+      "fps": 276401.7,
+      "wall_s": 17.0,
+      "source": "local_l40s/Isaac-Cartpole_physx_n4096/single",
+      "ts": "2026-06-11T21:00:48+00:00"
     }
   ]
 }

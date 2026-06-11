@@ -12,9 +12,11 @@
         "overrides live in baseline_overrides.json (committed with the PR), NOT here and NOT in the window.",
         "D6 warm-up exclusion: the gating KPI is the mean post-warm-up effective FPS -- the first",
         "warmup_frames are dropped (2 for PhysX tasks; 60 for shadow-vision to clear the camera/JIT window).",
-        "VARIANTS: a key may be a gym id (e.g. 'Isaac-Cartpole-v0', the PhysX default) or a variant",
-        "'<gym id>@<backend>' (e.g. 'Isaac-Cartpole-v0@newton') carrying its own 'task_id' (the real gym",
-        "task the benchmark is launched with) and benchmark_args. Newton uses physics=newton_mjwarp and a",
+        "VARIANTS: a key is a stable history/baseline label. When it differs from the live gym id, the",
+        "entry carries an explicit 'task_id' (the real gym task the benchmark is launched with) -- e.g.",
+        "'Isaac-Cartpole-v0' maps to the registered 'Isaac-Cartpole', and the '<gym id>@<backend>' Newton",
+        "variants (e.g. 'Isaac-Cartpole-v0@newton') reuse the same 'task_id' with their own benchmark_args.",
+        "Newton uses physics=newton_mjwarp and a",
         "5-frame warm-up (JIT). Output/history are keyed by the full variant key so PhysX and Newton don't collide.",
         "Gate config: NVIDIA L40S, WARM runs/task, num_frames=300, seed=42.",
         "Fallback values were derived from the existing warm L40S runs (500f truncated to 300f, post-warm-up);",
@@ -22,6 +24,7 @@
         "Per-GPU keys substring-match hardware_info.gpu_devices[].name ('NVIDIA L40S' matches that device)."
     ],
     "Isaac-Cartpole-v0": {
+        "task_id": "Isaac-Cartpole",
         "num_envs": 4096,
         "num_frames": 300,
         "seed": 42,
@@ -30,11 +33,12 @@
         "config_note": "cartpole_physx_n4096",
         "per_gpu": {
             "NVIDIA L40S": {
-                "baseline_fps": 115235.8,
+                "baseline_fps": 276401.7,
                 "warn_pct": 5.0,
                 "max_regression_pct": 10.0,
                 "cv_pct": 2.02,
-                "n_runs": 5
+                "n_runs": 1,
+                "_provisional": "Single-run local re-baseline (isaaclab 6.6.1 / warp 1.13.0). Prior 115235.8 was ~2.4x stale (older build). Re-record a full window on the runner fleet; cv_pct/warn/block kept from the prior calibration until then."
             }
         }
     },
@@ -73,7 +77,7 @@
         }
     },
     "Isaac-Cartpole-v0@newton": {
-        "task_id": "Isaac-Cartpole-v0",
+        "task_id": "Isaac-Cartpole",
         "num_envs": 4096,
         "num_frames": 300,
         "seed": 42,

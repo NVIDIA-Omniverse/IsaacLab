@@ -125,6 +125,10 @@ jobs:
       # TODO(bringup): these two nv-gha-runners actions still need repo-admin
       # allowlist approval. Pinned to main@<sha> below (no release tags exist).
       - name: Get PR info
+        # Only meaningful on the copy-pr-bot push model (recovers PR metadata from
+        # the mirrored commit). A manual workflow_dispatch has no originating PR, so
+        # skip it there to keep dispatch-triggered trial runs unblocked.
+        if: github.event_name == 'push'
         uses: nv-gha-runners/get-pr-info@090577647b8ddc4e06e809e264f7881650ecdccf  # main
 
       - name: Checkout

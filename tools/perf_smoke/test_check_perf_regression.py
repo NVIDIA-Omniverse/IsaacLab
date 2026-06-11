@@ -430,7 +430,12 @@ class HardFailureTests(_GateTestBase):
 
 
 def _info_phase(
-    task: str = TASK, num_envs: int = 512, seed: int = 42, num_frames: int = 300, presets: str | None = None
+    task: str = TASK,
+    num_envs: int = 512,
+    seed: int = 42,
+    num_frames: int = 300,
+    presets: str | None = None,
+    physics: str | None = None,
 ) -> dict:
     """A ``benchmark_info`` phase echoing the run config (for config-assert tests)."""
     meta = [
@@ -441,6 +446,8 @@ def _info_phase(
     ]
     if presets is not None:
         meta.append({"name": "benchmark_non_rl benchmark_info presets", "data": presets})
+    if physics is not None:
+        meta.append({"name": "benchmark_non_rl benchmark_info physics", "data": physics})
     return {"phase_name": "benchmark_info", "measurements": [], "metadata": meta}
 
 
@@ -482,8 +489,9 @@ class ConfigAssertTests(_GateTestBase):
         code, out = self._run()
         self.assertEqual(code, cpr.EXIT_PASS)
 
-    def test_matching_presets_pass(self) -> None:
-        self._write_result(self._doc_with_info(_info_phase(presets="newton_mjwarp")))
+    def test_matching_physics_pass(self) -> None:
+        # physics= is reported in benchmark_info.physics, not folded into presets.
+        self._write_result(self._doc_with_info(_info_phase(physics="newton_mjwarp")))
         self._write_baseline(
             {TASK: {"benchmark_args": ["physics=newton_mjwarp"], "per_gpu": {GPU: {"baseline_fps": BASELINE_FPS}}}}
         )
@@ -492,19 +500,19 @@ class ConfigAssertTests(_GateTestBase):
 
     def test_wrong_backend_blocks(self) -> None:
         # Baseline expects Newton but the run reported PhysX -> a different KPI, hard_failure.
-        self._write_result(self._doc_with_info(_info_phase(presets="physx")))
+        self._write_result(self._doc_with_info(_info_phase(physics="physx")))
         self._write_baseline(
             {TASK: {"benchmark_args": ["physics=newton_mjwarp"], "per_gpu": {GPU: {"baseline_fps": BASELINE_FPS}}}}
         )
         code, out = self._run()
         self.assertEqual(code, cpr.EXIT_HARD_FAILURE)
         self.assertIn("config_mismatch", out)
-        self.assertIn("presets(", out)
-        self.assertIn("missing=newton_mjwarp", out)
+        self.assertIn("physics(", out)
+        self.assertIn("want=newton_mjwarp", out)
 
-    def test_multi_preset_subset_match(self) -> None:
-        # Each expected token (physx + renderer) must appear in the comma-joined presets.
-        self._write_result(self._doc_with_info(_info_phase(presets="physx,isaacsim_rtx_renderer")))
+    def test_physics_and_presets_both_checked(self) -> None:
+        # physics= is matched against benchmark_info.physics; presets= against presets.
+        self._write_result(self._doc_with_info(_info_phase(physics="physx", presets="isaacsim_rtx_renderer")))
         self._write_baseline(
             {
                 TASK: {
@@ -516,9 +524,9 @@ class ConfigAssertTests(_GateTestBase):
         code, _ = self._run()
         self.assertEqual(code, cpr.EXIT_PASS)
 
-    def test_presets_unreported_is_noop(self) -> None:
-        # Older results omit presets -> we don't assert (no false BLOCK).
-        self._write_result(self._doc_with_info(_info_phase(presets=None)))
+    def test_physics_unreported_is_noop(self) -> None:
+        # Older results omit the physics field -> we don't assert (no false BLOCK).
+        self._write_result(self._doc_with_info(_info_phase(physics=None)))
         self._write_baseline(
             {TASK: {"benchmark_args": ["physics=newton_mjwarp"], "per_gpu": {GPU: {"baseline_fps": BASELINE_FPS}}}}
         )
