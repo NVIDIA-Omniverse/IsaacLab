@@ -67,10 +67,12 @@ jobs:
           DISPATCH_TASKS: ${{ github.event_name == 'workflow_dispatch' && inputs.tasks || '' }}
         run: |
           set -euo pipefail
-          if [ -n "${DISPATCH_TASKS}" ]; then
+          # TRIAL PIN (throwaway pull-request/90002 branch): run only the
+          # re-baselined cartpole task for the single-task fleet run-through.
+          # Do NOT carry this onto neilm/perf-gate-ci or develop.
+          tasks_json='["Isaac-Cartpole-v0"]'
+          if false && [ -n "${DISPATCH_TASKS}" ]; then
             tasks_json="$(printf '%s\n' ${DISPATCH_TASKS} | jq -R . | jq -cs .)"
-          else
-            tasks_json="$(jq -c '[keys[] | select(startswith("_") | not)]' tools/perf_smoke/baseline.json)"
           fi
           echo "tasks=$tasks_json" >> "$GITHUB_OUTPUT"
           echo "Matrix tasks: $tasks_json"
