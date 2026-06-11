@@ -1,0 +1,26 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Throwaway dry-run: confirm this repo can schedule a job on NVIDIA's arm64
+# L40S fleet. Uses no actions (no checkout / nv-gha-runners) so it cannot trip
+# the action allowlist. Safe to delete after verifying.
+name: Fleet Sanity (L40S)
+
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+  workflow_dispatch:
+
+jobs:
+  sanity:
+    runs-on: linux-arm64-gpu-l40s-latest-1
+    timeout-minutes: 15
+    steps:
+      - name: GPU + arch info
+        run: |
+          echo "host: $(hostname)"
+          echo "arch: $(uname -m)"
+          nvidia-smi
