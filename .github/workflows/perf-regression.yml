@@ -1,0 +1,128 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Performance regression CI gate (OmniPerf).
+#
+# IMPORTANT: this runs on NVIDIA's self-hosted NVKS fleet, where ProdSec forbids
+# `pull_request` / `pull_request_target` triggers. Code reaches us only via
+# `copy-pr-bot`, which copies trusted (or `/ok to test`-approved) PRs onto a
+# `pull-request/<N>` branch in the source repo. So we trigger on `push` to those
+# branches, NOT on `pull_request`. See:
+#   https://docs.gha-runners.nvidia.com/platform/onboarding/pull-request-testing/
+#
+# Because the event is a `push` (not a `pull_request`), `github.event.pull_request.*`
+# is unavailable — we recover PR context via the nv-gha-runners/get-pr-info action.
+
+name: Performance Smoke
+
+on:
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+
+# One run per PR branch; cancel superseded pushes.
+concurrency:
+  group: perf-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # post the perf summary comment
+  statuses: write        # report the gate status back to the PR commit
+  checks: write
+
+env:
+  NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+  ISAACSIM_BASE_IMAGE: ${{ vars.ISAACSIM_BASE_IMAGE || 'nvcr.io/nvidia/isaac-sim' }}
+  ISAACSIM_BASE_VERSION: ${{ vars.ISAACSIM_BASE_VERSION || '5.1.0' }}
+  DOCKER_IMAGE_TAG: isaac-lab-perf:${{ github.sha }}
+
+jobs:
+  # Recover PR metadata (number, base branch, head repo) from the push event.
+  pr-info:
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.get-pr.outputs.number }}
+      base_sha: ${{ steps.get-pr.outputs.base_sha }}
+    steps:
+      - name: Get PR info
+        id: get-pr
+        uses: nv-gha-runners/get-pr-info@main
+
+  benchmark:
+    needs: pr-info
+    # RTX PRO 6000, group `nv-gpu-amd64-rtxpro6000-1gpu` (driver 595, 16 cores,
+    # 64G). Only the `latest` driver alias exists for this GPU — there is no
+    # `earliest`. Confirmed against runner-groups.md.
+    runs-on: linux-amd64-gpu-rtxpro6000-latest-1
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Build Docker Image
+        uses: ./.github/actions/docker-build
+        with:
+          image-tag: ${{ env.DOCKER_IMAGE_TAG }}
+          isaacsim-base-image: ${{ env.ISAACSIM_BASE_IMAGE }}
+          isaacsim-version: ${{ env.ISAACSIM_BASE_VERSION }}
+
+      # --- Angelina's layer: WARM benchmark execution -------------------------
+      # Runs the perf smoke suite (G1, H1, Anymal-C, cartpole, camera tasks) and
+      # emits a machine-readable result (FPS / frame time per task).
+      # TODO(Angelina): replace with the pytest-based perf module once it lands.
+      - name: Run Performance Benchmarks (WARM)
+        run: |
+          mkdir -p reports
+          docker run --rm --gpus all \
+            -v ${{ github.workspace }}/reports:/workspace/isaaclab/reports \
+            ${{ env.DOCKER_IMAGE_TAG }} \
+            bash -lc './isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py \
+              --tasks G1 H1 Anymal-C cartpole \
+              --warm \
+              --output /workspace/isaaclab/reports/perf-results.json'
+
+      # --- Neil's layer: threshold check vs. baseline -------------------------
+      # Baselines MUST be keyed by (runner-type, GPU, env) — an AWS-L40S baseline
+      # is NOT comparable to an RTX-PRO-6000/NVKS run (see #nv-gha-runners thread).
+      # TODO(Neil): replace with the threshold-checker (load baseline, compute
+      # delta, fail if any metric regresses beyond the per-task threshold).
+      - name: Check Against Baseline
+        id: gate
+        run: |
+          echo "PR #${{ needs.pr-info.outputs.pr_number }} base ${{ needs.pr-info.outputs.base_sha }}"
+          python3 tools/perf/check_thresholds.py \
+            --results reports/perf-results.json \
+            --baseline-key "nvks-rtxpro6000-1gpu" \
+            --pr "${{ needs.pr-info.outputs.pr_number }}"
+
+      - name: Upload Perf Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-pr-${{ needs.pr-info.outputs.pr_number }}
+          path: reports/perf-results.json
+          retention-days: 7
+          compression-level: 9
+
+      # Status is reported against github.sha, which (per copy-pr-bot) matches the
+      # PR's head commit, so it surfaces on the PR automatically.
+      - name: Report Perf Gate Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ok = '${{ steps.gate.outcome }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: ok ? 'success' : 'failure',
+              context: 'perf-regression',
+              description: ok ? 'No perf regression detected' : 'Perf regression detected — see artifact',
+            });

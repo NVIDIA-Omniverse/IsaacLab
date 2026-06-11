@@ -1,0 +1,6 @@
+enabled: true
+# Don't auto-copy draft PRs to pull-request/* branches — avoids burning GPU
+# runner time on every push to an in-progress PR. Ready-for-review PRs sync
+# automatically; drafts require an explicit `/ok to test` from a vetter.
+auto_sync_draft: false
+auto_sync_ready: true
