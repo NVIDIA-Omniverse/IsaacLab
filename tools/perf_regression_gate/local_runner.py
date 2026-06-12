@@ -45,6 +45,8 @@ if str(_MODULE_DIR) not in sys.path:
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
+from gpu_identity import canonical_gpu_model, gpu_model_config_keys  # noqa: E402
+from launch_config import hydra_args_for_task, task_to_launch_config, write_launch_config  # noqa: E402
 from task_config import TaskConfig, load_tasks  # noqa: E402
 
 
@@ -64,7 +66,11 @@ def _parse_args() -> argparse.Namespace:
         default=["always"],
         help="Run only tasks whose tag list overlaps this set (default: always)",
     )
-    p.add_argument("--gpu_model", default="L40S", help="GPU model label for baseline bucket (default: L40S)")
+    p.add_argument(
+        "--gpu_model",
+        default=None,
+        help="GPU model label for baseline bucket (default: auto-detect with nvidia-smi)",
+    )
     p.add_argument(
         "--artifacts_dir",
         type=Path,
@@ -90,7 +96,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--skip_existing",
         action="store_true",
-        help="Skip tasks whose bench_result.json already exists in --artifacts_dir",
+        help="Skip tasks whose perf_regression_gate_result.json already exists in --artifacts_dir",
     )
     p.add_argument(
         "--gate_config",
@@ -106,6 +112,23 @@ def _parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 
+def _detect_gpu_model() -> str:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return "unknown-gpu"
+    for line in result.stdout.splitlines():
+        gpu_model = line.strip()
+        if gpu_model:
+            return gpu_model
+    return "unknown-gpu"
+
+
 def _print_matrix(tasks: list[TaskConfig], tags: list[str]) -> None:
     print(f"\n{'=' * 68}")
     print(f"  Phase 1 — Task Matrix  ({len(tasks)} entries, tags={tags})")
@@ -116,6 +139,18 @@ def _print_matrix(tasks: list[TaskConfig], tags: list[str]) -> None:
     for t in tasks:
         print(col.format(t.task_id, t.backend_key, t.num_envs, t.num_frames, t.timeout_minutes))
     print()
+
+
+def _hydra_args(task: TaskConfig) -> list[str]:
+    return hydra_args_for_task(task)
+
+
+def _fps_mean_floor(task: TaskConfig, gpu_model: str) -> float:
+    for key in gpu_model_config_keys(gpu_model):
+        value = task.fps_mean_floor.get(key, {}).get(task.backend_key)
+        if value is not None:
+            return float(value)
+    return 0.0
 
 
 def _isaaclab_cmd(bench_script: Path, task: TaskConfig, artifact_dir: Path) -> list[str]:
@@ -130,22 +165,9 @@ def _isaaclab_cmd(bench_script: Path, task: TaskConfig, artifact_dir: Path) -> l
         "--benchmark_backend", "json",
         "--output_path", str(artifact_dir),
     ]
-    # Combine physics and render presets into a single Hydra token.
-    # newton physics requires newton_mjwarp; render backends use their canonical
-    # preset name (newton_renderer for Warp, ovrtx_renderer for OV-RTX, absent for
-    # default RTX). Warp renderer also requires the rgb data-type preset to avoid
-    # the semantic_segmentation incompatibility in ShadowHandVisionEnvCfg.
-    presets: list[str] = []
-    if task.physics_backend == "newton":
-        presets.append("newton_mjwarp")
-    if task.render_backend:
-        presets.append(task.render_backend)
-        if task.render_backend == "newton_renderer":
-            presets.append("rgb")
-    if presets:
-        cmd.append(f"presets={','.join(presets)}")
     if task.seed is not None:
         cmd.extend(["--seed", str(task.seed)])
+    cmd.extend(_hydra_args(task))
     return cmd
 
 
@@ -188,6 +210,7 @@ def _run_build_bench_result(
     *,
     was_retried: bool = False,
     attempt: int = 1,
+    gate_config: Path | None = None,
 ) -> None:
     """Run build_bench_result.py for one task (plain Python, no IsaacSim needed)"""
     build_script = _MODULE_DIR / "build_bench_result.py"
@@ -202,10 +225,14 @@ def _run_build_bench_result(
         "--wall_time_s", f"{wall_time:.1f}",
         "--timeout_s", str(task.timeout_minutes * 60),
         "--log_file", str(artifact_dir / "benchmark.log"),
+        "--launch_config", str(artifact_dir / "launch_config.json"),
         "--attempt", str(attempt),
     ]
+    if gate_config is not None:
+        cmd.extend(["--gate_config", str(gate_config)])
     if was_retried:
         cmd.append("--was_retried")
+    sys.stdout.flush()
     subprocess.run(cmd, check=True)
 
 
@@ -227,6 +254,7 @@ def _run_aggregate(artifacts_dir: Path, baselines_dir: Path, gpu_model: str,
         "--gate_config", str(gate_config),
         "--allow_baseline_update", "true" if allow_baseline_update else "false",
     ]
+    sys.stdout.flush()
     result = subprocess.run(cmd)
     return result.returncode
 
@@ -238,6 +266,8 @@ def _run_aggregate(artifacts_dir: Path, baselines_dir: Path, gpu_model: str,
 
 def main() -> int:
     args = _parse_args()
+    gpu_model_raw = args.gpu_model or _detect_gpu_model()
+    gpu_model = canonical_gpu_model(gpu_model_raw)
 
     # Expand matrix from tasks.json
     all_tasks = load_tasks()
@@ -249,6 +279,8 @@ def main() -> int:
         return 1
 
     _print_matrix(tasks, args.tags)
+
+    print(f"[local_runner] GPU model bucket: {gpu_model} (raw={gpu_model_raw})")
 
     if args.dry_run:
         print("[local_runner] --dry_run: exiting without running benchmarks.")
@@ -270,10 +302,18 @@ def main() -> int:
         artifact_dir = args.artifacts_dir / task.task_id / task.backend_key
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        bench_result_path = artifact_dir / "bench_result.json"
+        bench_result_path = artifact_dir / "perf_regression_gate_result.json"
         if args.skip_existing and bench_result_path.exists():
-            print(f"[{i}/{len(tasks)}] SKIP (bench_result.json exists): {task.task_id} / {task.backend_key}")
+            print(f"[{i}/{len(tasks)}] SKIP (perf_regression_gate_result.json exists): {task.task_id} / {task.backend_key}")
             continue
+
+        launch_config = task_to_launch_config(
+            task,
+            fps_mean_floor=_fps_mean_floor(task, gpu_model),
+            gpu_model=gpu_model_raw,
+            hydra_args=_hydra_args(task),
+        )
+        write_launch_config(artifact_dir, launch_config)
 
         print(f"[{i}/{len(tasks)}] {task.task_id} / {task.backend_key}")
         print(f"  envs={task.num_envs}  frames={task.num_frames}  timeout={task.timeout_minutes}m")
@@ -292,7 +332,15 @@ def main() -> int:
 
         attempt = 2 if was_retried else 1
         print(f"\n[{i}/{len(tasks)}] exit={exit_code}  wall={wall_time:.0f}s  attempt={attempt}  → build_bench_result")
-        _run_build_bench_result(task, artifact_dir, exit_code, wall_time, was_retried=was_retried, attempt=attempt)
+        _run_build_bench_result(
+            task,
+            artifact_dir,
+            exit_code,
+            wall_time,
+            was_retried=was_retried,
+            attempt=attempt,
+            gate_config=args.gate_config,
+        )
         print()
 
     # -----------------------------------------------------------------------
@@ -310,7 +358,7 @@ def main() -> int:
     rc = _run_aggregate(
         args.artifacts_dir,
         args.baselines_dir,
-        args.gpu_model,
+        gpu_model,
         args.gate_config,
         args.allow_baseline_update,
     )

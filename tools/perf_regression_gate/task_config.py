@@ -7,6 +7,11 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from .backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+except ImportError:  # pragma: no cover - supports direct script imports
+    from backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+
 _DEFAULT_TASKS_JSON = Path(__file__).parent / "tasks.json"
 
 # Maps backend name to list of cache identifiers that CI needs to pull; absent key defaults to no caches
@@ -53,6 +58,7 @@ class TaskConfig:
     task_type: str = "benchmark"
     runs_on: str = "gpu-l40s"
     seed: int | None = None
+    baseline_epoch: int = 1
 
     @property
     def backend_key(self) -> str:
@@ -61,9 +67,7 @@ class TaskConfig:
         Returns f"{physics_backend}_{render_backend}" when render_backend is set,
         otherwise returns physics_backend.
         """
-        if self.render_backend:
-            return f"{self.physics_backend}_{self.render_backend}"
-        return self.physics_backend
+        return make_backend_key(self.physics_backend, self.render_backend)
 
     @property
     def excluded_frames(self) -> frozenset[int]:
@@ -131,8 +135,10 @@ def load_tasks(tasks_json_path: Path | str | None = None) -> list[TaskConfig]:
         backends: list[dict] = merged.get("backends", [])
 
         for backend_entry in backends:
-            physics = backend_entry["physics"]
-            render = backend_entry.get("render")
+            physics = normalize_physics_backend(backend_entry["physics"])
+            if physics is None:
+                raise ValueError(f"backend entry in {path} must define a non-default physics backend")
+            render = normalize_render_backend(backend_entry.get("render"))
             tasks.append(
                 TaskConfig(
                     task_id=merged["task_id"],
@@ -150,6 +156,7 @@ def load_tasks(tasks_json_path: Path | str | None = None) -> list[TaskConfig]:
                     task_type=merged["type"],
                     runs_on=merged["runs_on"],
                     seed=merged.get("seed"),
+                    baseline_epoch=int(merged.get("baseline_epoch", 1)),
                 )
             )
     return tasks

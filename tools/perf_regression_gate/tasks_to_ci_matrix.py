@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Convert tasks.json into the GitHub Actions bench matrix JSON.
+"""Convert tasks.json into the GitHub Actions bench matrix JSON
 
 Prints a JSON array to stdout, one object per (task_id, backend) combination,
 containing the fields consumed by the ``bench`` job matrix in perf-regression-gate.yaml.
@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from launch_config import hydra_args_for_task  # noqa: E402
 from task_config import load_tasks  # noqa: E402
 
 tasks = load_tasks()
@@ -30,6 +31,8 @@ for task in tasks:
         "render_backend": task.render_backend or "",
         "num_envs": task.num_envs,
         "num_frames": task.num_frames,
+        "seed": task.seed if task.seed is not None else "",
+        "hydra_args": " ".join(hydra_args_for_task(task)),
         "bench_timeout_s": task.timeout_minutes * 60,
         "job_timeout_minutes": max(30, task.timeout_minutes + 15),
     })

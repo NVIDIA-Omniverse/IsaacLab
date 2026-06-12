@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 
+from perf_regression_gate.gate_types import FailurePhase
+
 
 def capture_test_output_with_timeout(cmd, timeout, env, startup_deadline=0, report_file=""):
     """Run a command with timeout and capture all output while streaming in real-time.
@@ -245,27 +247,27 @@ def classify_failure_phase(
 
     # 1. OOM
     if exit_code == 137 or "oom-kill" in stderr:
-        return "oom"
+        return FailurePhase.OOM.value
 
     # 2. Hang
     if wall_time_s >= timeout_s * 0.95:
-        return "hang"
+        return FailurePhase.HANG.value
 
     # 3. Import error
     if "Traceback" in combined and "AppLauncher" not in stdout:
-        return "import"
+        return FailurePhase.IMPORT.value
 
     # 4. Driver error
     if "CudaError" in combined or "CUDA_ERROR_" in combined:
-        return "driver"
+        return FailurePhase.DRIVER.value
 
     # 5. Init failure
     if exit_code != 0 and "AppLauncher initialization complete" in stdout and "Step Frametimes" not in stdout:
-        return "init"
+        return FailurePhase.INIT.value
 
     # 6. Runtime failure (partial run then crash)
     if exit_code != 0 and "Step Frametimes" in stdout:
-        return "runtime"
+        return FailurePhase.RUNTIME.value
 
     # 7. Clean exit
     return None

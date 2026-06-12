@@ -5,6 +5,10 @@
 
 # Performance Regression Gate
 #
+# GPU jobs default to the RTX PRO 6000 runner label used by the upstream
+# deployment. Override with repo variable PERF_GATE_RUNS_ON, e.g. a JSON array
+# of runner labels.
+#
 # Runs a matrix of benchmark tasks on self-hosted runners, compares
 # results to the rolling baseline in angehu/perf-baselines, and posts a verdict
 # table to the job summary.  Non-blocking by default (gate_config.json).
@@ -16,19 +20,27 @@
 #   aggregate → download all bench artifacts, run oracle, update baselines
 #              (self-hosted, gpu)
 #
-# Baseline updates are pushed to angehu/perf-baselines only from main, 
-# develop, release or angehu/perf-gate-poc branches.
+# Baseline updates are published from protected-branch push events
+# (main/develop/release) plus angehu/perf-gate-poc while this POC is active.
+# Mirrored PR pushes under pull-request/<number> can run the gate on upstream
+# RTX runners; they are read-only unless PERF_GATE_ALLOW_MIRROR_BASELINE_UPDATE
+# is explicitly enabled as a temporary deployment escape hatch.
 #
 # backend_key: "{physics_backend}_{render_backend}" when render_backend is
 # set, otherwise just physics_backend.  Matches TaskConfig.backend_key.
 # TODO: replace angehu/perf-baselines w/ real branch name
+# TODO: remove angehu/perf-gate-poc after deployment
 
 name: Performance Regression Gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, develop, 'release/**']
+  merge_group:
+    branches: [main, develop, 'release/**']
+  push:
+    branches: [main, develop, 'release/**', angehu/perf-gate-poc, 'pull-request/**']
   workflow_dispatch:
 
 concurrency:
@@ -37,13 +49,14 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: read
 
 env:
   CI_IMAGE_TAG: >-
     isaac-lab-ci:${{
       github.event_name == 'pull_request'
       && format('pr-{0}', github.event.pull_request.number)
-      || github.ref_name
+      || 'sha'
     }}-${{ github.sha }}
 
 jobs:
@@ -52,6 +65,7 @@ jobs:
   # ---------------------------------------------------------------------------
   config:
     name: Load Config
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     outputs:
       isaacsim_image_name: ${{ steps.load.outputs.isaacsim_image_name }}
@@ -82,7 +96,8 @@ jobs:
   # ---------------------------------------------------------------------------
   bench:
     name: Bench / ${{ matrix.task_id }} / ${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}
-    runs-on: [self-hosted, gpu]
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ${{ fromJSON(vars.PERF_GATE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
     needs: [config]
     continue-on-error: true
     timeout-minutes: ${{ matrix.job_timeout_minutes }}
@@ -134,6 +149,16 @@ jobs:
         LOG_FILE="${ARTIFACT_DIR}/benchmark.log"
 
         mkdir -p "${ARTIFACT_DIR}"
+        GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+        if [[ -z "${GPU_MODEL}" ]]; then
+          GPU_MODEL="unknown-gpu"
+        fi
+        python3 tools/perf_regression_gate/write_launch_config.py \
+          --task_id "${TASK_ID}" \
+          --physics_backend "${PHYSICS_BACKEND}" \
+          --render_backend "${RENDER_BACKEND}" \
+          --gpu_model "${GPU_MODEL}" \
+          --artifact_dir "${ARTIFACT_DIR}"
 
         # Remove any stale container from a previous run attempt
         docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
@@ -142,10 +167,7 @@ jobs:
         # benchmark_non_rl.py accepts Hydra-style preset tokens (no leading dashes).
         # Physics is selected via the sim_backend token; render via renderer= token.
         # TODO: Update these tokens once benchmark_non_rl.py CLI flags are finalised.
-        PRESET_TOKENS=""
-        if [ -n "${RENDER_BACKEND}" ]; then
-          PRESET_TOKENS="renderer=${RENDER_BACKEND}"
-        fi
+        HYDRA_ARGS="${{ matrix.hydra_args }}"
 
         # Start the benchmark container in detached mode
         docker run -d --name "${CONTAINER_NAME}" \
@@ -172,7 +194,8 @@ jobs:
               --num_frames ${{ matrix.num_frames }} \
               --benchmark_backend json \
               --output_path /tmp/bench_out \
-              ${PRESET_TOKENS}
+              ${{ matrix.seed != '' && format('--seed {0}', matrix.seed) || '' }} \
+              ${HYDRA_ARGS}
           "
 
         START=$(date +%s)
@@ -234,10 +257,7 @@ jobs:
 
         docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
-        PRESET_TOKENS=""
-        if [ -n "${RENDER_BACKEND}" ]; then
-          PRESET_TOKENS="renderer=${RENDER_BACKEND}"
-        fi
+        HYDRA_ARGS="${{ matrix.hydra_args }}"
 
         docker run -d --name "${CONTAINER_NAME}" \
           --init --stop-timeout 10 \
@@ -263,7 +283,8 @@ jobs:
               --num_frames ${{ matrix.num_frames }} \
               --benchmark_backend json \
               --output_path /tmp/bench_out \
-              ${PRESET_TOKENS}
+              ${{ matrix.seed != '' && format('--seed {0}', matrix.seed) || '' }} \
+              ${HYDRA_ARGS}
           "
 
         START=$(date +%s)
@@ -327,6 +348,8 @@ jobs:
           --wall_time_s "${FINAL_WALL}" \
           --timeout_s "${{ matrix.bench_timeout_s }}" \
           --log_file "${ARTIFACT_DIR}/benchmark.log" \
+          --launch_config "${ARTIFACT_DIR}/launch_config.json" \
+          --gate_config tools/perf_regression_gate/gate_config.json \
           ${EXTRA_FLAGS}
 
     - name: Upload bench artifacts
@@ -361,10 +384,10 @@ jobs:
   # ---------------------------------------------------------------------------
   aggregate:
     name: Aggregate + Verdict
-    runs-on: [self-hosted, gpu]
+    runs-on: ${{ fromJSON(vars.PERF_GATE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
     needs: [bench]
-    # Always run even when some bench jobs fail or are skipped
-    if: always()
+    # Always run for real gate attempts, even when some bench jobs fail.
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
 
     steps:
     - name: Checkout Code
@@ -372,10 +395,11 @@ jobs:
       with:
         fetch-depth: 0
 
-    # Create a local branch so _baseline_worktree can commit to it
+    # Prime the remote-tracking baseline ref. aggregate.py refetches immediately
+    # before reading and again inside the transactional push retry loop.
     - name: Fetch baselines branch
       run: |
-        git fetch origin angehu/perf-baselines:angehu/perf-baselines || \
+        git fetch origin +refs/heads/angehu/perf-baselines:refs/remotes/origin/angehu/perf-baselines || \
           echo "::warning::Baseline branch not found; gate will run as a seed run (no baseline comparison)"
 
     - name: Download bench artifacts
@@ -385,24 +409,31 @@ jobs:
         path: artifacts/
         merge-multiple: false
 
+    - name: Resolve gate context
+      id: gate_context
+      env:
+        ALLOW_MIRROR_UPDATE: ${{ vars.PERF_GATE_ALLOW_MIRROR_BASELINE_UPDATE || 'false' }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        python3 tools/perf_regression_gate/github_gate_context.py
+
     - name: Run aggregate oracle
       id: aggregate
       run: |
-        ALLOW_UPDATE="false"
-        if [[ "${{ github.ref }}" == "refs/heads/develop" || \
-              "${{ github.ref }}" == "refs/heads/angehu/perf-gate-poc" ]]; then
-          ALLOW_UPDATE="true"
+        GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+        if [[ -z "${GPU_MODEL}" ]]; then
+          GPU_MODEL="unknown-gpu"
         fi
         python3 tools/perf_regression_gate/aggregate.py \
           --artifacts_dir artifacts/ \
-          --gpu_model L40S \
+          --gpu_model "${GPU_MODEL}" \
           --gate_config tools/perf_regression_gate/gate_config.json \
           --baseline_branch angehu/perf-baselines \
-          --allow_baseline_update "${ALLOW_UPDATE}" \
+          --baseline_remote origin \
+          --baseline_push_retries 3 \
+          --base_sha "${{ steps.gate_context.outputs.base_sha }}" \
+          --target_branch "${{ steps.gate_context.outputs.target_branch }}" \
+          --source_branch "${{ steps.gate_context.outputs.source_branch }}" \
+          --allow_baseline_update "${{ steps.gate_context.outputs.allow_update }}" \
+          --trusted_source "${{ steps.gate_context.outputs.trusted_source }}" \
           --summary_file "${GITHUB_STEP_SUMMARY}"
-
-    # Push baseline updates only from eligible branches
-    - name: Push baseline updates
-      if: steps.aggregate.outputs.baselines_updated == 'true'
-      run: |
-        git push origin angehu/perf-baselines

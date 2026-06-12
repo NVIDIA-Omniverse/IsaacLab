@@ -3,29 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""CI aggregate script: load per-task perf_regression_gate_result.json, run oracle, update baselines.
-
-Scans the local (downloaded) artifacts directory for perf_regression_gate_result.json files, runs the
-oracle for each, writes a GitHub Step Summary table, and optionally updates the baselines branch.
-
-Usage::
-
-    python3 tools/perf_regression_gate/aggregate.py \\
-        --artifacts_dir artifacts/ \\
-        --gpu_model L40S \\
-        --gate_config tools/perf_regression_gate/gate_config.json \\
-        --baseline_branch angehu/perf-baselines \\
-        --allow_baseline_update true \\
-        --summary_file "$GITHUB_STEP_SUMMARY"
-
-For offline/test use, pass ``--baselines_dir`` to read/write flat files instead
-of the git baselines branch::
-
-    python3 tools/perf_regression_gate/aggregate.py \\
-        --artifacts_dir artifacts/ \\
-        --gpu_model L40S \\
-        --baselines_dir local_baselines/
-"""
+"""Aggregate benchmark artifacts, run the oracle, and update trusted baselines"""
 
 import argparse
 import json
@@ -39,139 +17,217 @@ if str(_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(_MODULE_DIR))
 if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
-DEFAULT_BASELINE_BRANCH = "angehu/perf-baselines"  # TODO: replace w/ real branch name
+DEFAULT_BASELINE_BRANCH = "angehu/perf-baselines"  # TODO: replace with actual dorphan branch
 
-from oracle import OracleVerdict, compare  # noqa: E402
-from baseline_manager import load_baseline, load_baseline_git, update_baseline, update_baseline_git  # noqa: E402
-from gate_config import load_gate_config  # noqa: E402
+from baseline_manager import (  # noqa: E402
+    BaselineUpdateRecord,
+    load_baseline,
+    load_baseline_git,
+    make_sample_metadata,
+    match_context_from_bench_result,
+    refresh_baseline_branch,
+    update_baseline,
+    update_baselines_git,
+)
+from gate_config import BASELINE_PUSH_RETRIES, load_gate_config  # noqa: E402
+from gpu_identity import canonical_gpu_model, gpu_model_config_keys  # noqa: E402
+from gate_types import OracleVerdict  # noqa: E402
+from oracle import compare  # noqa: E402
 from task_config import get_task  # noqa: E402
 
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="Aggregate bench results and run oracle.")
-    p.add_argument(
-        "--artifacts_dir",
-        required=True,
-        type=Path, 
-        help="Root directory containing per-task artifact subdirectories",
-    )
-    p.add_argument("--gpu_model", default="L40S")
-    p.add_argument("--gate_config", type=Path, default=_MODULE_DIR / "gate_config.json")
-    p.add_argument(
-        "--baseline_branch",
-        default=f"{DEFAULT_BASELINE_BRANCH}",
-        help=f"Git branch for baseline storage (default: {DEFAULT_BASELINE_BRANCH})",
-    )
-    p.add_argument(
-        "--baselines_dir",
-        type=Path,
-        default=None,
-        help="Flat-file baseline directory; bypasses git (use for offline testing)",
-    )
-    p.add_argument(
-        "--allow_baseline_update",
-        default="false",
-        help="Update baselines for PASS/WARN results ('true'/'false', default: false)",
-    )
-    p.add_argument(
-        "--summary_file",
-        default=None,
-        help="Append step-summary markdown to this path (set to $GITHUB_STEP_SUMMARY in CI)",
-    )
-    return p.parse_args()
+    parser = argparse.ArgumentParser(description="Aggregate bench results and run oracle.")
+    parser.add_argument("--artifacts_dir", required=True, type=Path)
+    parser.add_argument("--gpu_model", default="L40S")
+    parser.add_argument("--gate_config", type=Path, default=_MODULE_DIR / "gate_config.json")
+    parser.add_argument("--baseline_branch", default=DEFAULT_BASELINE_BRANCH)
+    parser.add_argument("--baseline_remote", default="origin", help="Git remote that owns the baseline branch; empty = local only")
+    parser.add_argument("--baseline_push_retries", type=int, default=None)
+    parser.add_argument("--baselines_dir", type=Path, default=None, help="Flat-file baseline directory; bypasses git")
+    parser.add_argument("--allow_baseline_update", default="false")
+    parser.add_argument("--summary_file", default=None)
+    parser.add_argument("--base_sha", default=None, help="PR base SHA for ancestry-aware baseline matching")
+    parser.add_argument("--target_branch", default=None, help="Target protected branch, e.g. main/develop/release/x")
+    parser.add_argument("--source_branch", default=None, help="Branch that produced baseline updates")
+    parser.add_argument("--trusted_source", default="protected_branch", help="Audit label for baseline samples written by this run")
+    return parser.parse_args()
 
 
 def _find_bench_results(artifacts_dir: Path) -> list[tuple[Path, dict]]:
-    """Return list of (artifact_dir: Path, perf_regression_gate_result: dict) sorted by task_id."""
     found = []
-    for p in sorted(artifacts_dir.rglob("perf_regression_gate_result.json")):
-        with p.open() as fh:
-            bench_result = json.load(fh)
-        found.append((p.parent, bench_result))
+    for path in sorted(artifacts_dir.rglob("perf_regression_gate_result.json")):
+        with path.open() as fh:
+            found.append((path.parent, json.load(fh)))
     return found
 
 
-def _excluded_frames(bench_result: dict) -> frozenset:
-    """Expand excluded_frames_raw from the task_config_snapshot into a frozenset."""
-    raw = (bench_result.get("task_config_snapshot") or {}).get("excluded_frames_raw", [])
+def _excluded_frames(bench_result: dict) -> frozenset[int]:
+    launch_config = bench_result.get("launch_config") or {}
+    raw = launch_config.get("excluded_frames_raw")
+    if raw is None:
+        raw = (bench_result.get("task_config_snapshot") or {}).get("excluded_frames_raw", [])
     indices: set[int] = set()
-    for entry in raw:
+    for entry in raw or []:
         if isinstance(entry, list):
-            indices.update(range(entry[0], entry[1] + 1))
+            indices.update(range(int(entry[0]), int(entry[1]) + 1))
         else:
             indices.add(int(entry))
     return frozenset(indices)
 
 
-def _fmt(v, decimals: int = 1) -> str:
-    return f"{v:.{decimals}f}" if v is not None else "N/A"
+def _fmt(value, decimals: int = 1) -> str:
+    return f"{value:.{decimals}f}" if value is not None else "N/A"
 
 
-def _build_summary_table(rows: list) -> str:
+def _short_sha(value: str | None) -> str:
+    return value[:12] if value else "none"
+
+
+def _bench_gpu_model(bench_result: dict, fallback: str) -> str:
+    launch_config = bench_result.get("launch_config") or {}
+    gpu_model = canonical_gpu_model(launch_config.get("gpu_model") or launch_config.get("gpu_model_raw"))
+    return canonical_gpu_model(fallback) if gpu_model == "unknown_gpu" else gpu_model
+
+
+def _hard_floor(bench_result: dict, gpu_model: str, backend: str) -> float:
+    launch_config = bench_result.get("launch_config") or {}
+    if launch_config.get("fps_mean_floor") is not None:
+        return float(launch_config.get("fps_mean_floor") or 0.0)
+    try:
+        task = get_task(bench_result["task_id"], backend)
+        for key in gpu_model_config_keys(gpu_model):
+            value = task.fps_mean_floor.get(key, {}).get(backend)
+            if value is not None:
+                return float(value)
+        return 0.0
+    except Exception:
+        return 0.0
+
+
+def _build_summary_table(rows: list[tuple]) -> str:
     lines = [
-        "| Task | Backend | Verdict | FPS (mean) | Baseline | Regression% | Wall (s) |",
-        "|------|---------|---------|------------|----------|-------------|----------|",
+        "| Task | Backend | Verdict | FPS | Baseline | Samples | Regression% | Floor | Threshold | Phase | Retry | GPU | Runtime | Note |",
+        "|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
     ]
-    for r in rows:
+    for result, bench_result in rows:
+        gpu_diag = bench_result.get("gpu_diag") or {}
+        launch_config = bench_result.get("launch_config") or {}
+        gpu_name = gpu_diag.get("gpu_name") or launch_config.get("gpu_model_raw") or launch_config.get("gpu_model", "")
+        provenance = bench_result.get("provenance") or {}
+        software = provenance.get("software") or {}
+        runtime = ", ".join(
+            part
+            for part in (
+                f"cuda={gpu_diag.get('cuda_version')}" if gpu_diag.get("cuda_version") else "",
+                f"driver={gpu_diag.get('nvidia_driver_version')}" if gpu_diag.get("nvidia_driver_version") else "",
+                f"warp={software.get('warp')}" if software.get("warp") else "",
+            )
+            if part
+        )
+        note_parts = [part for part in (result.note, bench_result.get("config_mismatch")) if part]
+        if bench_result.get("p99_over_median") is not None:
+            note_parts.append(f"p99/med={bench_result['p99_over_median']}")
+        if bench_result.get("outlier_count") is not None:
+            note_parts.append(f"outliers={bench_result['outlier_count']}")
         lines.append(
-            f"| {r.task_id} | {r.backend} | {r.verdict.value}"
-            f" | {_fmt(r.measured_fps)} | {_fmt(r.baseline_fps)}"
-            f" | {_fmt(r.regression_pct, 2)} | {_fmt(r.wall_time_s, 1)} |"
+            f"| {result.task_id} | {result.backend} | {result.verdict.value}"
+            f" | {_fmt(result.measured_fps)} | {_fmt(result.baseline_fps)} | {result.baseline_sample_count}"
+            f" | {_fmt(result.regression_pct, 2)} | {_fmt(result.hard_floor_fps)} | {result.threshold_source}"
+            f" | {result.failure_phase or ''} | {result.was_retried} | {gpu_name}"
+            f" | {runtime} | {'; '.join(note_parts)} |"
         )
     return "\n".join(lines)
+
+
+def _write_github_output(**values) -> None:
+    github_output = os.environ.get("GITHUB_OUTPUT", "")
+    if not github_output:
+        return
+    with open(github_output, "a") as fh:
+        for key, value in values.items():
+            if value is not None:
+                fh.write(f"{key}={value}\n")
 
 
 def main() -> int:
     args = _parse_args()
     use_flat = args.baselines_dir is not None
     allow_update = args.allow_baseline_update.strip().lower() in ("true", "1", "yes")
+    baseline_remote = args.baseline_remote or None
 
     gate_config = load_gate_config(args.gate_config)
-    blocking = gate_config.get("blocking", False)
+    blocking = bool(gate_config.get("blocking", False))
+    min_block_regression_pct = float(gate_config.get("min_block_regression_pct", 3.0))
+    baseline_push_retries = int(args.baseline_push_retries or gate_config.get("baseline_push_retries", BASELINE_PUSH_RETRIES))
 
     items = _find_bench_results(args.artifacts_dir)
     if not items:
         print(f"[aggregate] No perf_regression_gate_result.json files found under {args.artifacts_dir}")
         return 1
 
-    oracle_results = []
+    baseline_read_sha = None
+    baseline_read_ref = None
+    if not use_flat:
+        try:
+            baseline_read_sha = refresh_baseline_branch(args.baseline_branch, remote=baseline_remote, allow_missing=True)
+            baseline_read_ref = baseline_read_sha
+        except Exception as exc:
+            print(f"::error::Failed to refresh baseline branch before reading: {exc}")
+            return 1
+        if baseline_read_sha:
+            print(f"[aggregate] Baseline read snapshot: {args.baseline_branch}@{_short_sha(baseline_read_sha)}")
+        else:
+            print(f"[aggregate] Baseline branch {args.baseline_branch!r} not found; treating this as a seed run")
+
+    rows = []
     has_block = False
     has_hard_failure = False
     baselines_updated = False
+    baseline_update_failed = False
+    pending_git_updates: list[BaselineUpdateRecord] = []
 
     for artifact_dir, bench_result in items:
         task_id = bench_result["task_id"]
-        backend = bench_result.get("backend_key")
+        backend = bench_result.get("backend_key") or bench_result.get("backend")
+        bench_gpu_model = _bench_gpu_model(bench_result, args.gpu_model)
+        match_context = match_context_from_bench_result(
+            bench_result,
+            gpu_model=bench_gpu_model,
+            base_sha=args.base_sha,
+            target_branch=args.target_branch,
+        )
 
-        # Load rolling baseline (None on seed passes/failed load)
         baseline = None
         try:
             if use_flat:
-                baseline = load_baseline(args.baselines_dir, args.gpu_model, task_id, backend)
-            else:
-                baseline = load_baseline_git(args.baseline_branch, args.gpu_model, task_id, backend, None)
+                baseline = load_baseline(args.baselines_dir, bench_gpu_model, task_id, backend, match_context=match_context)
+            elif baseline_read_ref:
+                baseline = load_baseline_git(
+                    baseline_read_ref,
+                    bench_gpu_model,
+                    task_id,
+                    backend,
+                    None,
+                    match_context,
+                )
         except Exception as exc:
             print(f"[aggregate] Warning: baseline load failed for {task_id}/{backend}: {exc}")
-
-        # Hard-floor FPS for this task (0.0 = disabled)
-        try:
-            task = get_task(task_id, backend)
-            fps_mean_floor = task.fps_mean_floor.get(args.gpu_model, {}).get(backend, 0.0)
-        except Exception:
-            fps_mean_floor = 0.0
 
         oracle_result = compare(
             bench_result=bench_result,
             baseline=baseline,
-            fps_mean_floor=fps_mean_floor,
+            fps_mean_floor=_hard_floor(bench_result, bench_gpu_model, backend),
             excluded_frames=_excluded_frames(bench_result),
             artifact_dir=artifact_dir,
+            min_block_regression_pct=min_block_regression_pct,
         )
-        oracle_results.append(oracle_result)
+        rows.append((oracle_result, bench_result))
 
         print(
             f"[aggregate] {task_id}/{backend}: {oracle_result.verdict.value}"
             f"  fps={_fmt(oracle_result.measured_fps)}  baseline={_fmt(oracle_result.baseline_fps)}"
+            f"  samples={oracle_result.baseline_sample_count}  source={oracle_result.threshold_source}"
         )
 
         if oracle_result.verdict == OracleVerdict.BLOCK:
@@ -179,31 +235,74 @@ def main() -> int:
         elif oracle_result.verdict == OracleVerdict.HARD_FAILURE:
             has_hard_failure = True
 
-        # Update baseline only for measured PASS/WARN results (never for BLOCK/HARD_FAILURE) pushed
-        # to designated branches or force update with flag for offline/testing use.
         if (
             allow_update
             and oracle_result.verdict in (OracleVerdict.PASS, OracleVerdict.WARN)
             and oracle_result.measured_fps is not None
         ):
-            try:
-                if use_flat:
-                    update_baseline(args.baselines_dir, args.gpu_model, task_id, backend, oracle_result.measured_fps)
-                else:
-                    update_baseline_git(
-                        args.baseline_branch,
-                        args.gpu_model,
+            sample_metadata = make_sample_metadata(
+                gpu_model=bench_gpu_model,
+                task_id=task_id,
+                backend=backend,
+                fps=oracle_result.measured_fps,
+                bench_result=bench_result,
+                target_branch=args.target_branch,
+                source_branch=args.source_branch,
+                trusted_source=args.trusted_source,
+            )
+            if baseline_read_sha:
+                sample_metadata["baseline_read_sha"] = baseline_read_sha
+
+            if use_flat:
+                try:
+                    update_baseline(
+                        args.baselines_dir,
+                        bench_gpu_model,
                         task_id,
                         backend,
                         oracle_result.measured_fps,
-                        None,
+                        sample_metadata=sample_metadata,
                     )
-                baselines_updated = True
-                print(f"[aggregate]   -> baseline updated: {oracle_result.measured_fps:.1f} FPS")
-            except Exception as exc:
-                print(f"[aggregate] Warning: baseline update failed for {task_id}/{backend}: {exc}")
+                    baselines_updated = True
+                    print(f"[aggregate]   -> baseline updated locally: {oracle_result.measured_fps:.1f} FPS")
+                except Exception as exc:
+                    baseline_update_failed = True
+                    print(f"::error::Baseline update failed for {task_id}/{backend}: {exc}")
+            else:
+                pending_git_updates.append(
+                    BaselineUpdateRecord(
+                        gpu_model=bench_gpu_model,
+                        task_id=task_id,
+                        backend=backend,
+                        fps=oracle_result.measured_fps,
+                        sample_metadata=sample_metadata,
+                    )
+                )
+                print(f"[aggregate]   -> baseline update queued: {oracle_result.measured_fps:.1f} FPS")
 
-    table = _build_summary_table(oracle_results)
+    baseline_push_result = None
+    if pending_git_updates:
+        try:
+            baseline_push_result = update_baselines_git(
+                args.baseline_branch,
+                pending_git_updates,
+                remote=baseline_remote,
+                max_retries=baseline_push_retries,
+            )
+            baselines_updated = baseline_push_result.pushed
+            if baseline_push_result.pushed:
+                print(
+                    f"[aggregate] Baseline push succeeded: {args.baseline_branch}@"
+                    f"{_short_sha(baseline_push_result.pushed_sha)} "
+                    f"after {baseline_push_result.attempts} attempt(s)"
+                )
+            else:
+                print("[aggregate] Baseline samples were already present; no push needed")
+        except Exception as exc:
+            baseline_update_failed = True
+            print(f"::error::Baseline push failed: {exc}")
+
+    table = _build_summary_table(rows)
     print("\n## Performance Gate Results\n")
     print(table)
     print()
@@ -211,18 +310,33 @@ def main() -> int:
     if args.summary_file:
         with open(args.summary_file, "a") as fh:
             fh.write("\n## Performance Gate Results\n\n")
+            if not use_flat:
+                fh.write(f"Baseline read SHA: `{_short_sha(baseline_read_sha)}`\n\n")
+                if baseline_push_result and baseline_push_result.pushed_sha:
+                    fh.write(
+                        f"Baseline pushed SHA: `{_short_sha(baseline_push_result.pushed_sha)}` "
+                        f"after {baseline_push_result.attempts} attempt(s)\n\n"
+                    )
             fh.write(table)
             fh.write("\n")
 
-    # Signal baseline push to the calling workflow step
-    if baselines_updated:
-        github_output = os.environ.get("GITHUB_OUTPUT", "")
-        if github_output:
-            with open(github_output, "a") as fh:
-                fh.write("baselines_updated=true\n")
-        print(f"[aggregate] Baselines updated; workflow will push {DEFAULT_BASELINE_BRANCH}") 
+    output_values = {"baseline_read_sha": baseline_read_sha}
+    if baseline_push_result:
+        output_values.update(
+            {
+                "baselines_updated": "true" if baseline_push_result.pushed else "false",
+                "baseline_pushed_sha": baseline_push_result.pushed_sha,
+                "baseline_push_attempts": baseline_push_result.attempts,
+            }
+        )
+    elif baselines_updated:
+        output_values["baselines_updated"] = "true"
+    _write_github_output(**output_values)
 
-    if blocking:  # from gate_config.py, explicit PR to make gate blocking
+    if baseline_update_failed:
+        return 1
+
+    if blocking:
         if has_block:
             return 1
         if has_hard_failure:
