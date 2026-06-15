@@ -72,6 +72,20 @@ def _measure_fps(task_id: str, run_dir: Path, warmup: int, num_frames: int | Non
         return None
 
 
+def _measure_provenance(task_id: str, run_dir: Path) -> dict:
+    """Read the run's per-sample provenance (commit / versions / fingerprint).
+
+    Best-effort: returns ``{}`` when the result is missing or unreadable so a
+    measurement still contributes its FPS sample to an un-bucketed window.
+    """
+    pattern = cpr.DEFAULT_GLOB_TEMPLATE.format(task=task_id)
+    try:
+        result_path = cpr._resolve_results(str(run_dir), pattern, allow_multiple=True)
+        return cpr.sample_provenance(cpr._load_result(result_path))
+    except cpr.CompareError:
+        return {}
+
+
 def _window_stats(samples: list[float]) -> dict | None:
     """Robust summary of a measurement window. ``None`` when there are no samples."""
     if not samples:
@@ -138,6 +152,7 @@ def measure_task(
     num_frames = int(num_frames) if isinstance(num_frames, (int, float)) else None
     samples: list[float] = []
     walls: list[float] = []
+    provenance: dict = {}
     for rep in range(1, repeat + 1):
         run_dir = out_root / task / f"{tag}rep{rep}"
         print(f"\n[rebaseline] === {task} {tag}rep {rep}/{repeat} (seed={cfg['seed']}) ===", flush=True)
@@ -152,32 +167,55 @@ def measure_task(
         print(f"[rebaseline] {task} rep {rep}: {fps:.0f} FPS ({wall:.0f}s)", flush=True)
         samples.append(fps)
         walls.append(wall)
+        # The environment is constant across reps; keep the latest non-empty stamp.
+        prov = _measure_provenance(task_id, run_dir)
+        if prov:
+            provenance = prov
     stats = _window_stats(samples)
     if stats is not None:
         stats["walls"] = walls
+        stats["provenance"] = provenance
     return stats
+
+
+# Provenance fields stamped onto every sample, mirroring cpr.sample_provenance.
+_SAMPLE_PROVENANCE_KEYS = ("commit", "warp", "isaaclab", "cuda")
 
 
 def _append_window(history_dir: Path, task: str, gpu_key: str, stats: dict, cap: int = 20) -> int:
     """Append this study's samples to the rolling-window store; prune to ``cap``.
 
     This is the orphan-branch update in the doc's model: each study contributes
-    its runs to ``<history-dir>/<task>__<gpu>.json``, oldest dropped past ``cap``.
+    its runs to the bucketed store ``<history-dir>/<fingerprint>/<task>__<gpu>.json``
+    (or the flat ``<history-dir>/<task>__<gpu>.json`` when the run carries no
+    environment provenance), oldest dropped past ``cap``. Each sample is stamped
+    with the commit + env versions so the window stays auditable and the reader
+    (:func:`check_perf_regression._history_window`) finds the matching bucket.
     Returns the resulting window length.
     """
-    history_dir.mkdir(parents=True, exist_ok=True)
-    path = history_dir / f"{task}__{gpu_key}.json".replace(" ", "_")
-    store = {"task": task, "gpu": gpu_key, "window": cap, "samples": []}
+    provenance = stats.get("provenance") or {}
+    fingerprint = provenance.get("fingerprint")
+    bucket = history_dir / fingerprint if fingerprint else history_dir
+    bucket.mkdir(parents=True, exist_ok=True)
+    path = bucket / f"{cpr.history_basename(task, gpu_key)}.json"
+    store: dict = {"task": task, "gpu": gpu_key, "window": cap, "samples": []}
+    if fingerprint:
+        store["fingerprint"] = fingerprint
     if path.exists():
         existing = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(existing, dict) and isinstance(existing.get("samples"), list):
             store = existing
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    stamp = {key: provenance[key] for key in _SAMPLE_PROVENANCE_KEYS if provenance.get(key)}
     walls = stats.get("walls") or [None] * len(stats["samples"])
     for fps, wall in zip(stats["samples"], walls):
-        store["samples"].append({"fps": round(fps, 1), "wall_s": wall, "ts": now, "source": "rebaseline"})
+        sample = {"fps": round(fps, 1), "wall_s": wall, "ts": now, "source": "rebaseline"}
+        sample.update(stamp)
+        store["samples"].append(sample)
     store["samples"] = store["samples"][-cap:]
     store["window"] = cap
+    if fingerprint:
+        store["fingerprint"] = fingerprint
     path.write_text(json.dumps(store, indent=2) + "\n", encoding="utf-8")
     return len(store["samples"])
 

@@ -29,7 +29,7 @@ import json
 import os
 from pathlib import Path
 
-from check_perf_regression import _load_result, steady_fps
+from check_perf_regression import _load_result, env_fingerprint, history_basename, sample_provenance, steady_fps
 
 _THIS_DIR = Path(__file__).resolve().parent
 _MATRIX = _THIS_DIR / "exploration_matrix" / "output"
@@ -67,6 +67,7 @@ def main() -> int:
     for task, (cell, warmup) in _TASKS.items():
         walls = _wall_by_round(cell)
         samples = []
+        fingerprint: str | None = None
         for rnd_dir in sorted(glob.glob(str(_MATRIX / cell / "warm_round*"))):
             run_index = int(os.path.basename(rnd_dir).replace("warm_round", ""))
             jsons = [p for p in sorted(glob.glob(os.path.join(rnd_dir, "*.json"))) if "meta" not in os.path.basename(p)]
@@ -74,14 +75,16 @@ def main() -> int:
                 continue
             result = _load_result(Path(jsons[-1]))
             fps = steady_fps(result, warmup, _NUM_FRAMES)
-            samples.append(
-                {
-                    "fps": round(fps, 1),
-                    "wall_s": walls.get(run_index),
-                    "source": f"{cell}/{os.path.basename(rnd_dir)}",
-                    "ts": now,
-                }
-            )
+            prov = sample_provenance(result)
+            fingerprint = env_fingerprint(result) or fingerprint
+            sample = {
+                "fps": round(fps, 1),
+                "wall_s": walls.get(run_index),
+                "source": f"{cell}/{os.path.basename(rnd_dir)}",
+                "ts": now,
+            }
+            sample.update({k: prov[k] for k in ("commit", "warp", "isaaclab", "cuda") if prov.get(k)})
+            samples.append(sample)
         store = {
             "task": task,
             "gpu": _GPU,
@@ -91,7 +94,11 @@ def main() -> int:
             "_note": "Seeded from L40S warm calibration runs (500f truncated to 300f, post-warm-up).",
             "samples": samples,
         }
-        out_path = _HISTORY_DIR / f"{task}__{_GPU}.json".replace(" ", "_")
+        if fingerprint:
+            store["fingerprint"] = fingerprint
+        bucket = _HISTORY_DIR / fingerprint if fingerprint else _HISTORY_DIR
+        bucket.mkdir(parents=True, exist_ok=True)
+        out_path = bucket / f"{history_basename(task, _GPU)}.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(store, f, indent=2)
             f.write("\n")

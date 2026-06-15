@@ -42,8 +42,14 @@ mild dip is an advisory **WARN** and only a real, sustained drop is a **BLOCK**.
 |---|---|
 | `test_check_perf_regression.py` | Unit tests for the comparator logic (no GPU). |
 | `test_stress_check_perf_regression.py` | Heavier stress/edge-case tests for the comparator. |
+| `test_history_fingerprint.py` | Unit tests for env-fingerprint bucketing + per-sample provenance. |
+| `test_run_perf_gate.py` | Unit tests for the orchestrator (config, command building, aggregation). |
+| `test_rebaseline.py` | Unit tests for the rebaseline tool (window stats, store writer, boiling-frog guard). |
 | `test_perf_gate.py` | The pytest entry point CI uses to drive a single task end-to-end. |
 | `pytest.ini` | Local pytest config for this directory. |
+
+For the architecture (data flow, the baseline/history model, and the verdict
+logic), see [`DESIGN.md`](DESIGN.md).
 
 ### CI wiring (in `.github/`)
 

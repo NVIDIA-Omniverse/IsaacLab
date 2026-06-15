@@ -76,9 +76,11 @@ jobs:
           echo "Matrix tasks: $tasks_json"
 
   # ---------------------------------------------------------------------------
-  # Comparator logic tests. Pure stdlib unittest -- no GPU, no Isaac Sim, and
-  # arch-independent -- so this validates the PASS/WARN/BLOCK verdict logic on
-  # every trigger and gives fast signal before the GPU job is scheduled.
+  # Pure-logic tests for the comparator, orchestrator, rebaseline tool, and the
+  # history-bucketing helpers. Pure stdlib unittest -- no GPU, no Isaac Sim, and
+  # arch-independent -- so this validates the PASS/WARN/BLOCK verdict logic, the
+  # launch-config plumbing, and the rolling-window writer on every trigger and
+  # gives fast signal before the GPU job is scheduled.
   # ---------------------------------------------------------------------------
   comparator-unit-tests:
     name: Comparator Unit Tests
@@ -86,8 +88,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-      - name: Run comparator unittest suite
-        run: python3 tools/perf_smoke/test_check_perf_regression.py
+      - name: Run unittest suite
+        run: |
+          set -e
+          for t in test_check_perf_regression test_history_fingerprint test_run_perf_gate test_rebaseline; do
+            echo "::group::$t"
+            python3 "tools/perf_smoke/$t.py"
+            echo "::endgroup::"
+          done
 
   # ---------------------------------------------------------------------------
   # The GPU gate. One job PER TASK (matrix from baseline.json): each task is its

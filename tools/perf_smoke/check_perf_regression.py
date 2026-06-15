@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -366,6 +367,66 @@ def _extract_provenance(result: dict) -> dict[str, object]:
     return out
 
 
+def _extract_commit(result: dict) -> str | None:
+    """Pull the source commit the run was built from (best-effort).
+
+    Reads ``version_info.dev.commit_hash`` (the benchmark backend's dev block)
+    with a couple of common fallbacks. Returns ``None`` when unavailable.
+    """
+    version = result.get("version_info")
+    if not isinstance(version, dict):
+        return None
+    dev = version.get("dev")
+    if isinstance(dev, dict):
+        for key in ("commit_hash", "commit_hash_short", "commit"):
+            val = dev.get(key)
+            if isinstance(val, str) and val:
+                return val
+    for key in ("commit_hash", "commit"):
+        val = version.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+# Provenance keys that define the *environment* (perf regime), and thus the
+# history bucket. GPU is already encoded in the file name, so it is excluded.
+_FINGERPRINT_KEYS = ("warp", "isaaclab", "cuda")
+
+
+def env_fingerprint(result: dict) -> str | None:
+    """Compute a short, stable bucket key from a run's environment provenance.
+
+    The fingerprint partitions the rolling-window history so that samples from
+    incomparable software stacks (e.g. a Warp bump that shifts the perf regime)
+    never pollute one another's baseline. Returns ``None`` when no provenance is
+    available, which makes callers fall back to the flat ("default") bucket.
+    """
+    prov = _extract_provenance(result)
+    parts = {key: prov[key] for key in _FINGERPRINT_KEYS if prov.get(key)}
+    if not parts:
+        return None
+    canonical = json.dumps(parts, sort_keys=True, separators=(",", ":"))
+    return "env-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+def sample_provenance(result: dict) -> dict[str, object]:
+    """Return the per-sample provenance stamped into each rolling-window record.
+
+    Bundles the environment versions (warp / isaaclab / cuda), the source commit,
+    and the derived :func:`env_fingerprint` so every stored sample is auditable
+    and re-bucketable without re-running the benchmark.
+    """
+    prov = _extract_provenance(result)
+    commit = _extract_commit(result)
+    if commit:
+        prov["commit"] = commit
+    fingerprint = env_fingerprint(result)
+    if fingerprint:
+        prov["fingerprint"] = fingerprint
+    return prov
+
+
 def _extract_gpu_name(result: dict) -> str | None:
     """Read the runner's GPU model name from the result's hardware metadata."""
     hw = result.get("hardware_info")
@@ -440,6 +501,15 @@ def _resolve_baseline(
     return matched_key, task_entry, entry
 
 
+def history_basename(task: str, gpu_key: str) -> str:
+    """Filesystem-safe ``<task>__<gpu>`` stem shared by the reader and writers.
+
+    Centralising this keeps the comparator (reader) and rebaseline/seed scripts
+    (writers) byte-for-byte consistent so bucketed history is always found.
+    """
+    return f"{task}__{gpu_key}".replace("/", "_").replace(" ", "_")
+
+
 def _history_window(history_dir: str | None, fingerprint: str | None, task: str, gpu_key: str) -> dict:
     """Load the rolling-window samples for ``(task, gpu)`` from the history store.
 
@@ -449,7 +519,7 @@ def _history_window(history_dir: str | None, fingerprint: str | None, task: str,
     """
     if not history_dir:
         return {}
-    safe = f"{task}__{gpu_key}".replace("/", "_").replace(" ", "_")
+    safe = history_basename(task, gpu_key)
     candidates = []
     if fingerprint:
         candidates.append(Path(history_dir) / fingerprint / f"{safe}.json")
@@ -544,7 +614,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", required=True, help="Path to baseline.json (run config + static fallback).")
     parser.add_argument("--history-dir", default=None, help="Rolling-window store (orphan-branch checkout).")
     parser.add_argument("--overrides", default=None, help="Path to baseline_overrides.json (committed with the PR).")
-    parser.add_argument("--fingerprint", default=None, help="History bucket key (git-subtree+deps hash).")
+    parser.add_argument(
+        "--fingerprint",
+        default=None,
+        help="History bucket key; overrides the env fingerprint auto-derived from the result.",
+    )
     parser.add_argument("--measured-wall-s", type=float, default=None, help="Wall-clock seconds of the run.")
     parser.add_argument("--results-glob", default=None, help=f"Result glob (defaults to {DEFAULT_GLOB_TEMPLATE!r}).")
     parser.add_argument("--gpu-override", default=None, help="Override the GPU name read from the result JSON.")
@@ -581,7 +655,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit("PASS", task=args.task, gpu=gpu_key, note="skipped_by_override")
         return EXIT_PASS
 
-    window = _history_window(args.history_dir, args.fingerprint, args.task, gpu_key)
+    fingerprint = args.fingerprint or env_fingerprint(result)
+    window = _history_window(args.history_dir, fingerprint, args.task, gpu_key)
     center, spread, k_warn, k_block, source = _thresholds(window, entry, ov)
     delta_pct = (measured_fps - center) / center * 100.0
     warn_floor = center - k_warn * spread
@@ -590,6 +665,7 @@ def main(argv: list[str] | None = None) -> int:
     common: dict[str, object] = {
         "task": args.task,
         "gpu": gpu_key,
+        "bucket": fingerprint or "flat",
         "thresholds": source,
         "center_fps": f"{center:.0f}",
         "measured_fps": f"{measured_fps:.0f}",
