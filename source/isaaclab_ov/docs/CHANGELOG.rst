@@ -1,6 +1,15 @@
 Changelog
 ---------
 
+0.4.6 (2026-06-16)
+~~~~~~~~~~~~~~~~~~
+
+Fixed
+^^^^^
+
+* Fixed OVRTX camera PPISP/HDR rendering to disable Gaussian skip-tonemapping before renderer initialization.
+
+
 0.4.5 (2026-06-12)
 ~~~~~~~~~~~~~~~~~~
 

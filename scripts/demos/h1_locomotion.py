@@ -43,8 +43,6 @@ args_cli = parser.parse_args()
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-"""Rest everything follows."""
-
 import torch
 from rsl_rl.runners import OnPolicyRunner
 

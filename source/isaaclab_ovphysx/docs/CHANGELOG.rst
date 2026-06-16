@@ -1,6 +1,15 @@
 Changelog
 ---------
 
+3.0.5 (2026-06-16)
+~~~~~~~~~~~~~~~~~~
+
+Changed
+^^^^^^^
+
+* Reused shared path-expression helpers when deriving OVPhysX schema-root view expressions.
+
+
 3.0.4 (2026-06-10)
 ~~~~~~~~~~~~~~~~~~
 

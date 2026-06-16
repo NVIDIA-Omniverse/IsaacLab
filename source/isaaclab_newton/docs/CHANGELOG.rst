@@ -1,6 +1,25 @@
 Changelog
 ---------
 
+1.0.2 (2026-06-16)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added Newton camera renderer support for PPISP controller parameters.
+
+Changed
+^^^^^^^
+
+* Reused shared path-expression helpers when deriving Newton schema-root view expressions and deletion invalidation matches.
+
+Fixed
+^^^^^
+
+* Fixed Newton renderer shadow-model initialization to read clone plans from the active :class:`~isaaclab.sim.SimulationContext`.
+
+
 1.0.1 (2026-06-14)
 ~~~~~~~~~~~~~~~~~~
 
