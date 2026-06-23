@@ -1,6 +1,48 @@
 Changelog
 ---------
 
+8.0.4 (2026-06-23)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added OVPhysX physics preset support to
+  ``Isaac-Franka-Cabinet-Direct-v0``.
+
+Changed
+^^^^^^^
+
+* Updated golden images for the ``dexsuite_kuka_hetero`` tests combining Newton
+  physics with the IsaacSim RTX renderer, reflecting corrected USD prim
+  population.
+
+
+8.0.3 (2026-06-18)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added ``ovphysx`` preset to
+  :class:`~isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg.LocomotionVelocityRoughEnvCfg.RoughPhysicsCfg`
+  for use under the OVPhysX backend. ``RoughPhysicsCfg`` now exposes an
+  ``ovphysx`` member so ``Isaac-Velocity-Rough-Anymal-D-v0`` selects the
+  right physics + contact-sensor configuration when run with
+  ``presets=ovphysx``.
+
+
+8.0.2 (2026-06-17)
+~~~~~~~~~~~~~~~~~~
+
+Changed
+^^^^^^^
+
+* Updated golden images for the ``dexsuite_kuka_hetero`` Newton renderer tests (RGB and RGBA) to
+  reflect corrected shape colors now that USD material colors are propagated before clone
+  replication.
+
+
 8.0.1 (2026-06-14)
 ~~~~~~~~~~~~~~~~~~
 
