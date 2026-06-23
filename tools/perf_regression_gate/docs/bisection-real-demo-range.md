@@ -17,3 +17,6 @@ Expected demo flow:
 Known first-bad commit for this branch:
 
 - `af9729fe56dbe256aa2a255411fe82814cb9bb50`
+
+The branch tip should remain bad. Follow-up commits after the slowdown are
+intentional and exist only to make the binary search exercise a realistic range.
