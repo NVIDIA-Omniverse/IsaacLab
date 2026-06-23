@@ -13,3 +13,7 @@ Expected demo flow:
 2. Run the target cell at the branch tip to produce a regressed gate artifact.
 3. Feed that artifact into the bisection harness.
 4. Confirm the harness identifies the slowdown commit as the first bad commit.
+
+Known first-bad commit for this branch:
+
+- `af9729fe56dbe256aa2a255411fe82814cb9bb50`
