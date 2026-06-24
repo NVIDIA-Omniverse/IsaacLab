@@ -48,8 +48,8 @@ def _classify_subsystems(changed_files: list[dict[str, str]]) -> list[str]:
             subsystems.add("physics/simulation")
         if "tasks" in path or "envs" in path:
             subsystems.add("task/environment config")
-        if "tools/perf_regression_gate" in path:
-            subsystems.add("perf-gate tooling")
+        if "tools/perf_smoke_test" in path:
+            subsystems.add("perf-smoke tooling")
         if "docker" in path or ".github" in path:
             subsystems.add("CI/runtime infrastructure")
     return sorted(subsystems) if subsystems else ["uncategorized"]

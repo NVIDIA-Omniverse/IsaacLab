@@ -8,7 +8,7 @@ branch.
 a first-pass explanation of what that commit changed.
 - It is **artifact-driven**: every stage reads and writes plain JSON files, so it
 can be inspected, rerun, or launched from CI, Slack, or another agent.
-- It **reuses the perf-gate oracle** to label commits. It does not invent a
+- It **reuses the perf-smoke oracle** to label commits. It does not invent a
 second regression detector.
 - It is proven end-to-end on a real GPU with a real injected regression, and is
 currently being validated on the RTX PRO 6000 CI fleet through Docker.
@@ -32,7 +32,7 @@ The bisection agent automates exactly that loop:
 ## How It Works
 
 The agent runs a binary search over the commit range. At each midpoint commit it
-runs one real benchmark and asks the perf-gate oracle to classify the result.
+runs one real benchmark and asks the perf-smoke oracle to classify the result.
 
 ```text
 perf gate finds a regression
@@ -40,7 +40,7 @@ perf gate finds a regression
   -> harness lists commits between known-good and known-bad
   -> for each midpoint commit:
         single-commit runner checks out that commit in isolation,
-        runs ONE benchmark cell, emits normal perf-gate artifacts
+        runs ONE benchmark cell, emits normal perf-smoke artifacts
      oracle adapter labels it GOOD / BAD / SKIP
   -> engine narrows the range to the first BAD commit
   -> summary.json reports the first bad commit
@@ -56,12 +56,12 @@ bisection means the same thing as a "BAD" verdict on a PR.
 The bisection agent is not one monolithic script. It is a small set of files that
 each own one part of the workflow:
 
-- `bisection_plan_from_gate.py` creates a `plan.json` from a perf-gate failure.
+- `bisection_plan_from_gate.py` creates a `plan.json` from a perf-smoke failure.
 - `bisection_harness.py` is the command-line entry point that starts the run.
 - `bisection/engine.py` performs the binary search over commits.
 - `bisect_single_commit_runner.py` checks out one candidate commit and runs one
   benchmark cell.
-- `bisection/oracle_adapter.py` asks the existing perf-gate oracle whether that
+- `bisection/oracle_adapter.py` asks the existing perf-smoke oracle whether that
   candidate is GOOD, BAD, or SKIP.
 - `diagnose_bad_commit.py` writes the first-pass diagnosis after the first bad
   commit is found.
@@ -86,8 +86,8 @@ from CI, Slack, or another AI agent.
 | **Plan creator**         | `bisection_plan_from_gate.py`                      | Turns a gate artifact ("we found a regression") into a `plan.json` bisection job. The bridge between Phase 1 and Phase 2. |
 | **Harness**              | `bisection_harness.py`                             | CLI entry point and coordinator.                                                                                          |
 | **Engine**               | `bisection/engine.py`                              | The binary-search algorithm, timeouts, and retries.                                                                       |
-| **Single-commit runner** | `bisect_single_commit_runner.py`                   | Runs exactly one task/backend at exactly one commit and emits normal perf-gate artifacts.                                 |
-| **Oracle adapter**       | `bisection/oracle_adapter.py`                      | Reuses the perf-gate oracle to label a commit GOOD/BAD/SKIP.                                                              |
+| **Single-commit runner** | `bisect_single_commit_runner.py`                   | Runs exactly one task/backend at exactly one commit and emits normal perf-smoke artifacts.                                 |
+| **Oracle adapter**       | `bisection/oracle_adapter.py`                      | Reuses the perf-smoke oracle to label a commit GOOD/BAD/SKIP.                                                              |
 | **Diagnosis**            | `diagnose_bad_commit.py`, `bisection/diagnosis.py` | Compares the first bad commit to its parent: changed files, subsystem guess, FPS delta.                                   |
 
 
@@ -99,7 +99,7 @@ local demo up to GPU CI:
 - `synthetic`: fake FPS, for fast control-flow demos without a GPU.
 - `local-source`: real GPU run using an isolated checkout plus the host IsaacLab
 environment.
-- `docker-source`: real run inside the perf-gate CI container, intended for the
+- `docker-source`: real run inside the perf-smoke CI container, intended for the
 GPU fleet.
 
 ## The Data Contract (`plan.json`)
@@ -160,7 +160,7 @@ commit (`af9729fe56dbe256aa2a255411fe82814cb9bb50`), and diagnosis pointed at th
 Cartpole env file.
 
 **3. Docker/CI on the fleet (in progress).** A manual workflow
-(`.github/workflows/perf-gate-bisect.yaml`) runs the whole flow in
+(`.github/workflows/perf-smoke-bisect.yaml`) runs the whole flow in
 `docker-source` mode on the RTX PRO 6000 fleet, pulling the perf image from NVCR.
 Initial runs have proven checkout, NVCR image pull, GPU detection, and the real
 known-good benchmark cell. The remaining validation is to complete the full
@@ -171,7 +171,7 @@ Docker-backed bisection loop on the fleet.
 ### Locally (No GPU): See The Control Flow
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisection_harness.py run \
+./isaaclab.sh -p tools/perf_smoke_test/bisection_harness.py run \
   --plan <path-to-synthetic-plan.json> \
   --output_dir perf-output/bisection-demo
 ```
@@ -182,7 +182,7 @@ The workflow is `workflow_dispatch`-only. Dispatch it against the branch carryin
 the tooling:
 
 ```bash
-gh workflow run perf-gate-bisect.yaml --ref neilm/perf-gate-bisect \
+gh workflow run perf-smoke-bisect.yaml --ref neilm/perf-smoke-bisect \
   -f good_ref=<parent-of-regression-SHA> \
   -f bad_ref=<bad-tip-SHA> \
   -f task_id=Isaac-Cartpole-Direct \

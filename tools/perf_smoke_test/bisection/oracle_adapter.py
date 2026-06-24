@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Adapter from perf-gate artifacts to bisection verdicts."""
+"""Adapter from perf-smoke artifacts to bisection verdicts."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from oracle import OracleResult, compare  # noqa: E402
 
 
 def load_bench_result(artifact_dir: Path) -> dict:
-    """Load ``perf_regression_gate_result.json`` from an artifact directory."""
-    result_path = artifact_dir / "perf_regression_gate_result.json"
+    """Load ``perf_smoke_test_result.json`` from an artifact directory."""
+    result_path = artifact_dir / "perf_smoke_test_result.json"
     with result_path.open(encoding="utf-8") as fh:
         return json.load(fh)
 
@@ -37,7 +37,7 @@ def evaluate_artifact(
     baselines_dir: Path,
     gate_config: Path,
 ) -> tuple[dict, OracleResult]:
-    """Evaluate a perf-gate artifact directory with the existing oracle."""
+    """Evaluate a perf-smoke artifact directory with the existing oracle."""
     bench_result = load_bench_result(artifact_dir)
     config = load_gate_config(gate_config)
     bench_gpu_model = _bench_gpu_model(bench_result, gpu_model)

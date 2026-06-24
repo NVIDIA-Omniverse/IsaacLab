@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Create an IsaacLab bisection plan from perf-gate artifacts."""
+"""Create an IsaacLab bisection plan from perf-smoke artifacts."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from bisection.models import RetryPolicy, RunnerSpec, TimeoutPolicy  # noqa: E40
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create a bisection plan from a perf-gate artifact directory.")
+    parser = argparse.ArgumentParser(description="Create a bisection plan from a perf-smoke artifact directory.")
     parser.add_argument("--artifacts_dir", required=True, type=Path)
     parser.add_argument("--good_ref", required=True)
     parser.add_argument("--bad_ref", required=True)

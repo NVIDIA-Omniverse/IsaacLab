@@ -63,7 +63,7 @@ def format_runner_command(
     cmd = [
         str(_REPO_ROOT / "isaaclab.sh"),
         "-p",
-        str(_REPO_ROOT / "tools" / "perf_regression_gate" / "bisect_single_commit_runner.py"),
+        str(_REPO_ROOT / "tools" / "perf_smoke_test" / "bisect_single_commit_runner.py"),
         "--mode",
         runner.mode,
         "--commit",
@@ -167,7 +167,7 @@ def run_candidate(plan: BisectionPlan, output_dir: Path, commit_sha: str) -> Can
             timeout_s=plan.timeout.candidate_timeout_s,
         )
         note = "candidate_timeout" if timed_out else None
-        bench_result_path = artifact_dir / "perf_regression_gate_result.json"
+        bench_result_path = artifact_dir / "perf_smoke_test_result.json"
 
         attempts.append(
             CandidateAttempt(
@@ -216,12 +216,12 @@ def run_candidate(plan: BisectionPlan, output_dir: Path, commit_sha: str) -> Can
                 bisect_verdict="SKIP",
                 artifact_dir=str(artifact_dir),
                 command_exit_code=exit_code,
-                note="missing_perf_regression_gate_result",
+                note="missing_perf_smoke_test_result",
                 command=command_display,
                 attempt_count=attempt_idx,
                 attempts=[attempt.to_json() for attempt in attempts],
                 duration_s=duration_s,
-                retry_reason="missing_perf_regression_gate_result" if attempt_idx < max_attempts else None,
+                retry_reason="missing_perf_smoke_test_result" if attempt_idx < max_attempts else None,
                 final_artifact_dir=str(artifact_dir),
             )
         else:

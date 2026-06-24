@@ -1,7 +1,7 @@
 # Bisection Agent Bootstrap
 
 This note explains how YuTeh's regression-agent pattern maps to phase 2 of the
-perf-gate project and how to start with a preliminary bisection agent.
+perf-smoke project and how to start with a preliminary bisection agent.
 
 ## What YuTeh's Note Means
 
@@ -43,7 +43,7 @@ Our bisection agent:
 - Starts after the perf gate has already found a regression.
 - Focuses on one regressed task/backend first.
 - Tests commits between a known-good SHA and known-bad SHA.
-- Reuses the perf-gate oracle to classify each commit as `GOOD`, `BAD`, or `SKIP`.
+- Reuses the perf-smoke oracle to classify each commit as `GOOD`, `BAD`, or `SKIP`.
 - Produces a suspected first bad commit plus evidence.
 
 ## Design Principle To Copy
@@ -79,7 +79,7 @@ If any of those change, the agent may blame the wrong commit.
 The bootstrap script is:
 
 ```bash
-tools/perf_regression_gate/bisect_agent.py
+tools/perf_smoke_test/bisect_agent.py
 ```
 
 It currently provides the orchestration shell:
@@ -88,7 +88,7 @@ It currently provides the orchestration shell:
 2. List candidate commits on the ancestry path.
 3. Pick midpoint commits.
 4. Run a caller-provided command for each candidate.
-5. Read normal perf-gate artifacts from that command.
+5. Read normal perf-smoke artifacts from that command.
 6. Ask the existing oracle for `GOOD`, `BAD`, or `SKIP`.
 7. Write `status.json`, `results/*.json`, and `summary.json`.
 
@@ -98,11 +98,11 @@ without rewriting the bisection control flow.
 The demo single-commit runner is:
 
 ```bash
-tools/perf_regression_gate/bisect_single_commit_runner.py
+tools/perf_smoke_test/bisect_single_commit_runner.py
 ```
 
 It is intentionally synthetic for now. It uses `dev/stub_benchmark.py` to write
-normal perf-gate artifacts without launching Isaac Sim. The demo knob is
+normal perf-smoke artifacts without launching Isaac Sim. The demo knob is
 `--first_bad_ref`: that ref and its descendants emit low FPS, while earlier
 commits emit healthy FPS.
 
@@ -117,9 +117,9 @@ Example `plan.json`:
   "good_ref": "6c76e4a068ca8456618de70d5fbfc5ee3ed2364e",
   "bad_ref": "38197210a",
   "gpu_model": "rtx_pro_6000_blackwell",
-  "baselines_dir": "tools/perf_regression_gate/local_baselines",
-  "gate_config": "tools/perf_regression_gate/gate_config.json",
-  "runner_command": "python3 tools/perf_regression_gate/scripts/run_one_commit_placeholder.py --commit {commit_sha} --task {task_id} --backend {backend_key} --artifact-dir {artifact_dir}"
+  "baselines_dir": "tools/perf_smoke_test/local_baselines",
+  "gate_config": "tools/perf_smoke_test/gate_config.json",
+  "runner_command": "python3 tools/perf_smoke_test/scripts/run_one_commit_placeholder.py --commit {commit_sha} --task {task_id} --backend {backend_key} --artifact-dir {artifact_dir}"
 }
 ```
 
@@ -133,8 +133,8 @@ Supported runner-command placeholders:
 
 The runner command must write these files under `{artifact_dir}`:
 
-- `perf_regression_gate_result.json`
-- `perf_regression_gate_info.json`
+- `perf_smoke_test_result.json`
+- `perf_smoke_test_info.json`
 - `benchmark.log`
 - `launch_config.json`
 
@@ -145,7 +145,7 @@ That is the same artifact contract phase 1 already uses.
 This command demonstrates the full control loop without using GPUs:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_agent.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_agent.py \
   --good_ref HEAD~5 \
   --bad_ref HEAD \
   --task_id Isaac-Cartpole-Direct \
@@ -153,7 +153,7 @@ This command demonstrates the full control loop without using GPUs:
   --gpu_model L40S \
   --baselines_dir perf-output/bisect-synthetic-demo/local_baselines \
   --output_dir perf-output/bisect-synthetic-demo \
-  --runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_regression_gate/bisect_single_commit_runner.py --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --first_bad_ref ebfc82772 --gpu_model L40S --baselines_dir perf-output/bisect-synthetic-demo/local_baselines --ensure_baseline --good_fps 1000 --bad_fps 500"
+  --runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_smoke_test/bisect_single_commit_runner.py --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --first_bad_ref ebfc82772 --gpu_model L40S --baselines_dir perf-output/bisect-synthetic-demo/local_baselines --ensure_baseline --good_fps 1000 --bad_fps 500"
 ```
 
 What this does:
@@ -163,7 +163,7 @@ What this does:
 3. Emits roughly 1000 FPS before `ebfc82772`.
 4. Emits roughly 500 FPS at `ebfc82772` and descendants.
 5. Seeds a matching local baseline under `perf-output/bisect-synthetic-demo/local_baselines`.
-6. Uses the normal perf-gate oracle to classify commits.
+6. Uses the normal perf-smoke oracle to classify commits.
 7. Writes the suspected first bad commit to `summary.json`.
 
 Example output from this POC:
@@ -204,7 +204,7 @@ For example, the injected bad commit records:
 Use dry run first to verify the commit range:
 
 ```bash
-python3 tools/perf_regression_gate/bisect_agent.py \
+python3 tools/perf_smoke_test/bisect_agent.py \
   --good_ref <known-good-sha> \
   --bad_ref <known-bad-sha> \
   --task_id Isaac-Velocity-Flat-G1-v0 \
@@ -228,7 +228,7 @@ This writes:
 The single-commit runner has three execution modes.
 
 `synthetic` is the default demo mode. It runs `dev/stub_benchmark.py`, fakes the
-FPS value, and emits normal perf-gate artifacts. This keeps the bisection loop
+FPS value, and emits normal perf-smoke artifacts. This keeps the bisection loop
 fast and GPU-free while validating the harness contract.
 
 `docker-source` is the real single-cell mode. It checks out the candidate commit
@@ -245,7 +245,7 @@ user.
 Example:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
   --mode docker-source \
   --commit <candidate_sha> \
   --task_id Isaac-Velocity-Flat-G1-v0 \
@@ -258,13 +258,13 @@ Example:
 To plug this into a generated plan:
 
 ```bash
---runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_regression_gate/bisect_single_commit_runner.py --mode docker-source --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --image <fixed_isaaclab_ci_image> --gpu_model 'RTX PRO 6000'"
+--runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_smoke_test/bisect_single_commit_runner.py --mode docker-source --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --image <fixed_isaaclab_ci_image> --gpu_model 'RTX PRO 6000'"
 ```
 
 Example local L40S smoke run:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
   --mode local-source \
   --commit HEAD \
   --task_id Isaac-Cartpole-Direct \

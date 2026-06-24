@@ -8,7 +8,7 @@
 
 This is intentionally a small orchestration layer. It chooses commits to test,
 delegates the actual benchmark execution to a caller-provided command, then reads
-the normal perf-gate artifacts and asks the oracle whether the tested commit is
+the normal perf-smoke artifacts and asks the oracle whether the tested commit is
 GOOD, BAD, or SKIP.
 """
 
@@ -46,8 +46,8 @@ class BisectPlan:
     bad_ref: str
     runner_command: str
     gpu_model: str = "unknown-gpu"
-    baselines_dir: str = "tools/perf_regression_gate/local_baselines"
-    gate_config: str = "tools/perf_regression_gate/gate_config.json"
+    baselines_dir: str = "tools/perf_smoke_test/local_baselines"
+    gate_config: str = "tools/perf_smoke_test/gate_config.json"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -61,7 +61,7 @@ def _parse_args() -> argparse.Namespace:
         "--runner_command",
         default=None,
         help=(
-            "Command template that runs one commit and writes perf-gate artifacts. "
+            "Command template that runs one commit and writes perf-smoke artifacts. "
             "Supported placeholders: {commit_sha}, {task_id}, {backend_key}, {artifact_dir}, {repo_root}."
         ),
     )
@@ -106,8 +106,8 @@ def _coalesce_plan(args: argparse.Namespace) -> BisectPlan:
         bad_ref=value("bad_ref"),
         runner_command=value("runner_command", ""),
         gpu_model=value("gpu_model", "unknown-gpu"),
-        baselines_dir=value("baselines_dir", "tools/perf_regression_gate/local_baselines"),
-        gate_config=value("gate_config", "tools/perf_regression_gate/gate_config.json"),
+        baselines_dir=value("baselines_dir", "tools/perf_smoke_test/local_baselines"),
+        gate_config=value("gate_config", "tools/perf_smoke_test/gate_config.json"),
     )
 
 
@@ -171,7 +171,7 @@ def _run_candidate(plan: BisectPlan, output_dir: Path, commit_sha: str) -> dict[
         log_fh.write(f"$ {command}\n\n")
         result = subprocess.run(command, shell=True, cwd=_REPO_ROOT, stdout=log_fh, stderr=subprocess.STDOUT, text=True)
 
-    bench_result_path = artifact_dir / "perf_regression_gate_result.json"
+    bench_result_path = artifact_dir / "perf_smoke_test_result.json"
     record: dict[str, Any] = {
         "commit_sha": commit_sha,
         "artifact_dir": str(artifact_dir),
@@ -190,7 +190,7 @@ def _run_candidate(plan: BisectPlan, output_dir: Path, commit_sha: str) -> dict[
         record.update(
             {
                 "bisect_verdict": BisectVerdict.SKIP.value,
-                "note": "missing_perf_regression_gate_result",
+                "note": "missing_perf_smoke_test_result",
             }
         )
         return record

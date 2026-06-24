@@ -36,7 +36,7 @@ The demo is designed to work backward from what we want to show:
 1. A gate run has a regressed benchmark cell.
 2. The harness converts that gate output into a bisection plan.
 3. The bisection engine tests candidate commits.
-4. The existing perf-gate oracle labels each candidate `GOOD`, `BAD`, or `SKIP`.
+4. The existing perf-smoke oracle labels each candidate `GOOD`, `BAD`, or `SKIP`.
 5. The engine reports the suspected first bad commit.
 6. The diagnosis step compares the first bad commit to its parent and writes a
    human-readable report.
@@ -48,7 +48,7 @@ to replace the synthetic runner with a real source-isolated Docker runner.
 ## Files Added
 
 ```text
-tools/perf_regression_gate/
+tools/perf_smoke_test/
   bisection/
     __init__.py
     diagnosis.py
@@ -74,7 +74,7 @@ Existing gate files were not modified for this POC.
 Entry point:
 
 ```bash
-tools/perf_regression_gate/bisection_plan_from_gate.py
+tools/perf_smoke_test/bisection_plan_from_gate.py
 ```
 
 Role:
@@ -93,13 +93,13 @@ This is the bridge from phase 1 to phase 2.
 Entry point:
 
 ```bash
-tools/perf_regression_gate/bisection_harness.py
+tools/perf_smoke_test/bisection_harness.py
 ```
 
 Core module:
 
 ```bash
-tools/perf_regression_gate/bisection/engine.py
+tools/perf_smoke_test/bisection/engine.py
 ```
 
 Role:
@@ -108,7 +108,7 @@ Role:
 - build the ordered candidate commit list
 - choose midpoint commits
 - call the configured single-commit runner
-- read standard perf-gate artifacts
+- read standard perf-smoke artifacts
 - classify candidate commits with the existing oracle
 - write `status.json`, `results/*.json`, and `summary.json`
 
@@ -117,12 +117,12 @@ Role:
 Entry point:
 
 ```bash
-tools/perf_regression_gate/bisect_single_commit_runner.py
+tools/perf_smoke_test/bisect_single_commit_runner.py
 ```
 
 Current POC role:
 
-- use `dev/stub_benchmark.py` to create normal perf-gate artifacts
+- use `dev/stub_benchmark.py` to create normal perf-smoke artifacts
 - emit good FPS before a configured synthetic first-bad ref
 - emit bad FPS at and after that first-bad ref
 - optionally seed matching local baselines for the demo
@@ -139,13 +139,13 @@ Future real role:
 Entry point:
 
 ```bash
-tools/perf_regression_gate/diagnose_bad_commit.py
+tools/perf_smoke_test/diagnose_bad_commit.py
 ```
 
 Core module:
 
 ```bash
-tools/perf_regression_gate/bisection/diagnosis.py
+tools/perf_smoke_test/bisection/diagnosis.py
 ```
 
 Role:
@@ -171,8 +171,8 @@ perf-output/bisection-poc/
     <task>/<backend>/
       launch_config.json
       benchmark.log
-      perf_regression_gate_info.json
-      perf_regression_gate_result.json
+      perf_smoke_test_info.json
+      perf_smoke_test_result.json
   plan/
     gate_regressions.json
     plan.json
@@ -186,8 +186,8 @@ perf-output/bisection-poc/
       <sha>/<task>/<backend>/
         launch_config.json
         benchmark.log
-        perf_regression_gate_info.json
-        perf_regression_gate_result.json
+        perf_smoke_test_info.json
+        perf_smoke_test_result.json
     summary.json
     diagnosis.json
     diagnosis.md
@@ -208,7 +208,7 @@ mkdir -p perf-output/bisection-poc/gate-artifacts/Isaac-Cartpole-Direct/physx
 Create a synthetic regressed gate artifact:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
   --commit HEAD \
   --task_id Isaac-Cartpole-Direct \
   --backend_key physx \
@@ -224,20 +224,20 @@ Create a synthetic regressed gate artifact:
 Convert the gate output into a bisection plan:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisection_plan_from_gate.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisection_plan_from_gate.py \
   --artifacts_dir perf-output/bisection-poc/gate-artifacts \
   --good_ref HEAD~5 \
   --bad_ref HEAD \
   --gpu_model L40S \
   --baselines_dir perf-output/bisection-poc/local_baselines \
   --output_dir perf-output/bisection-poc/plan \
-  --runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_regression_gate/bisect_single_commit_runner.py --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --first_bad_ref ebfc82772 --gpu_model L40S --baselines_dir perf-output/bisection-poc/local_baselines --ensure_baseline --good_fps 1000 --bad_fps 500"
+  --runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_smoke_test/bisect_single_commit_runner.py --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --first_bad_ref ebfc82772 --gpu_model L40S --baselines_dir perf-output/bisection-poc/local_baselines --ensure_baseline --good_fps 1000 --bad_fps 500"
 ```
 
 Run the bisection harness:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisection_harness.py run \
+./isaaclab.sh -p tools/perf_smoke_test/bisection_harness.py run \
   --plan perf-output/bisection-poc/plan/plan.json \
   --output_dir perf-output/bisection-poc/run
 ```
@@ -245,7 +245,7 @@ Run the bisection harness:
 Generate the diagnosis report:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/diagnose_bad_commit.py \
+./isaaclab.sh -p tools/perf_smoke_test/diagnose_bad_commit.py \
   --run_dir perf-output/bisection-poc/run
 ```
 
@@ -447,10 +447,10 @@ The single-commit runner now has three modes:
 
 - `synthetic`: keeps the original GPU-free demo path. It uses
   `dev/stub_benchmark.py` to fake the FPS signal while still producing normal
-  perf-gate artifacts.
+  perf-smoke artifacts.
 - `docker-source`: checks out the candidate commit into an isolated clone,
   source-mounts that clone into a fixed Docker image, runs one real IsaacLab
-  task/backend, and then builds `perf_regression_gate_result.json` with the
+  task/backend, and then builds `perf_smoke_test_result.json` with the
   current gate tooling.
 - `local-source`: checks out the candidate commit into an isolated clone,
   symlinks the host `env_isaaclab` into that clone, runs the candidate clone's
@@ -464,7 +464,7 @@ host path for the current L40S development instance.
 Example single-commit invocation:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
   --mode docker-source \
   --commit <candidate_sha> \
   --task_id Isaac-Cartpole-Direct \
@@ -477,13 +477,13 @@ Example single-commit invocation:
 The bisection plan can use the same mode through `runner_command`:
 
 ```bash
---runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_regression_gate/bisect_single_commit_runner.py --mode docker-source --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --image <fixed_isaaclab_ci_image> --gpu_model 'RTX PRO 6000'"
+--runner_command "{repo_root}/isaaclab.sh -p {repo_root}/tools/perf_smoke_test/bisect_single_commit_runner.py --mode docker-source --commit {commit_sha} --task_id {task_id} --backend_key {backend_key} --artifact_dir {artifact_dir} --image <fixed_isaaclab_ci_image> --gpu_model 'RTX PRO 6000'"
 ```
 
 Example local L40S smoke invocation:
 
 ```bash
-./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
   --mode local-source \
   --commit HEAD \
   --task_id Isaac-Cartpole-Direct \
@@ -506,7 +506,7 @@ checkout:
 3. Mount that source tree into a fixed dependency image, or symlink the fixed
    host environment for `local-source`.
 4. Run one task/backend only.
-5. Emit the normal perf-gate artifacts.
+5. Emit the normal perf-smoke artifacts.
 6. Keep GPU, dependency environment, task config, seed, and runtime contract
    stable across all tested commits.
 
@@ -520,7 +520,7 @@ The current real modes provide source-isolated execution paths. The local path i
 validated, and a manual Docker/CI validation workflow now exists:
 
 ```text
-.github/workflows/perf-gate-bisect.yaml
+.github/workflows/perf-smoke-bisect.yaml
 ```
 
 The remaining production work is:

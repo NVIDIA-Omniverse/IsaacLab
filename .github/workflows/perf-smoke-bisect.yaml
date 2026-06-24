@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-name: Performance Gate - Bisect Regression
+name: Performance Smoke Test - Bisect Regression
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ on:
         required: true
         default: "physx"
       image:
-        description: "Perf-gate CI image. Empty = PERF_GATE_CI_IMAGE or nvcr.io/nvidian/isaac-lab:latest-perf."
+        description: "Perf-smoke CI image. Empty = PERF_SMOKE_CI_IMAGE or nvcr.io/nvidian/isaac-lab:latest-perf."
         required: false
         default: ""
       candidate_timeout_s:
@@ -60,7 +60,7 @@ env:
 jobs:
   bisect:
     name: Bisect perf regression
-    runs-on: ${{ fromJSON(vars.PERF_GATE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    runs-on: ${{ fromJSON(vars.PERF_SMOKE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
     timeout-minutes: 360
 
     steps:
@@ -79,7 +79,7 @@ jobs:
     - name: Pull prebuilt CI image
       env:
         INPUT_IMAGE: ${{ inputs.image }}
-        DEFAULT_IMAGE: ${{ vars.PERF_GATE_CI_IMAGE || 'nvcr.io/nvidian/isaac-lab:latest-perf' }}
+        DEFAULT_IMAGE: ${{ vars.PERF_SMOKE_CI_IMAGE || 'nvcr.io/nvidian/isaac-lab:latest-perf' }}
       run: |
         set -euo pipefail
         CI_IMAGE_REF="${INPUT_IMAGE:-${DEFAULT_IMAGE}}"
@@ -119,7 +119,7 @@ jobs:
     - name: Run known-good cell for local baseline
       run: |
         set -euo pipefail
-        ./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+        ./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
           --mode docker-source \
           --commit "${{ inputs.good_ref }}" \
           --task_id "${{ inputs.task_id }}" \
@@ -147,12 +147,12 @@ jobs:
         from pathlib import Path
 
         repo = Path.cwd()
-        sys.path.insert(0, str(repo / "tools" / "perf_regression_gate"))
+        sys.path.insert(0, str(repo / "tools" / "perf_smoke_test"))
         from baseline_manager import make_sample_metadata, update_baseline
         from gpu_identity import canonical_gpu_model
 
         output_dir = repo / os.environ["OUTPUT_DIR"]
-        result_path = output_dir / "good-artifacts" / os.environ["TASK_ID"] / os.environ["BACKEND_KEY"] / "perf_regression_gate_result.json"
+        result_path = output_dir / "good-artifacts" / os.environ["TASK_ID"] / os.environ["BACKEND_KEY"] / "perf_smoke_test_result.json"
         bench_result = json.loads(result_path.read_text(encoding="utf-8"))
         fps = float(bench_result["raw_fps_mean"])
         gpu_model = canonical_gpu_model(os.environ["GPU_MODEL"])
@@ -183,7 +183,7 @@ jobs:
     - name: Run bad cell to create gate artifact
       run: |
         set -euo pipefail
-        ./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+        ./isaaclab.sh -p tools/perf_smoke_test/bisect_single_commit_runner.py \
           --mode docker-source \
           --commit "${{ inputs.bad_ref }}" \
           --task_id "${{ inputs.task_id }}" \
@@ -198,7 +198,7 @@ jobs:
     - name: Generate structured bisection plan
       run: |
         set -euo pipefail
-        ./isaaclab.sh -p tools/perf_regression_gate/bisection_plan_from_gate.py \
+        ./isaaclab.sh -p tools/perf_smoke_test/bisection_plan_from_gate.py \
           --artifacts_dir "${OUTPUT_DIR}/gate-artifacts" \
           --good_ref "${{ inputs.good_ref }}" \
           --bad_ref "${{ inputs.bad_ref }}" \
@@ -219,7 +219,7 @@ jobs:
     - name: Run bisection harness
       run: |
         set -euo pipefail
-        ./isaaclab.sh -p tools/perf_regression_gate/bisection_harness.py run \
+        ./isaaclab.sh -p tools/perf_smoke_test/bisection_harness.py run \
           --plan "${OUTPUT_DIR}/plan/plan.json" \
           --output_dir "${OUTPUT_DIR}/run" \
           --max_tests "${{ inputs.max_tests }}"
@@ -229,7 +229,7 @@ jobs:
       run: |
         set -euo pipefail
         if [ -f "${OUTPUT_DIR}/run/summary.json" ]; then
-          ./isaaclab.sh -p tools/perf_regression_gate/diagnose_bad_commit.py \
+          ./isaaclab.sh -p tools/perf_smoke_test/diagnose_bad_commit.py \
             --run_dir "${OUTPUT_DIR}/run"
         else
           echo "::warning::No bisection summary found; skipping diagnosis"
@@ -251,7 +251,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v7
       with:
-        name: perf-gate-bisection-${{ github.run_id }}
+        name: perf-smoke-bisection-${{ github.run_id }}
         # Result/report dirs only. Per-candidate source clones and JIT/Kit caches
         # live under cells/ and candidates/ and are intentionally not uploaded.
         path: |

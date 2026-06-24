@@ -49,8 +49,8 @@ CI, Slack, or another agent.
    a known-good ref and known-bad ref.
 5. The harness tests midpoint commits, like a normal binary search.
 6. For each candidate commit, the single-commit runner checks out that source in
-   isolation, runs one benchmark cell, and emits normal perf-gate artifacts.
-7. The oracle adapter reuses the existing perf-gate oracle to classify that
+   isolation, runs one benchmark cell, and emits normal perf-smoke artifacts.
+7. The oracle adapter reuses the existing perf-smoke oracle to classify that
    candidate as `GOOD`, `BAD`, or `SKIP`.
 8. The bisection engine narrows the search until it finds the first bad commit.
 9. The diagnosis step compares the first bad commit to its parent and writes a
@@ -74,12 +74,12 @@ perf gate finds a regression
 File:
 
 ```text
-tools/perf_regression_gate/bisection_plan_from_gate.py
+tools/perf_smoke_test/bisection_plan_from_gate.py
 ```
 
 This is the bridge between Phase 1 and Phase 2.
 
-It reads perf-gate artifacts, re-evaluates them with the existing oracle, keeps
+It reads perf-smoke artifacts, re-evaluates them with the existing oracle, keeps
 the cells that are bad enough to bisect, and writes `plan.json`.
 
 In plain terms:
@@ -92,8 +92,8 @@ In plain terms:
 Files:
 
 ```text
-tools/perf_regression_gate/bisection_harness.py
-tools/perf_regression_gate/bisection/engine.py
+tools/perf_smoke_test/bisection_harness.py
+tools/perf_smoke_test/bisection/engine.py
 ```
 
 The harness is the command-line entry point. The engine is the binary-search
@@ -111,7 +111,7 @@ In plain terms:
 File:
 
 ```text
-tools/perf_regression_gate/bisect_single_commit_runner.py
+tools/perf_smoke_test/bisect_single_commit_runner.py
 ```
 
 This runs exactly one benchmark task/backend at exactly one commit.
@@ -133,10 +133,10 @@ In plain terms:
 File:
 
 ```text
-tools/perf_regression_gate/bisection/oracle_adapter.py
+tools/perf_smoke_test/bisection/oracle_adapter.py
 ```
 
-This lets the bisection agent reuse the Phase 1 perf-gate oracle.
+This lets the bisection agent reuse the Phase 1 perf-smoke oracle.
 
 It loads the candidate commit's normal benchmark artifacts and asks the oracle
 whether that commit is `GOOD`, `BAD`, or `SKIP`.
@@ -151,8 +151,8 @@ In plain terms:
 Files:
 
 ```text
-tools/perf_regression_gate/diagnose_bad_commit.py
-tools/perf_regression_gate/bisection/diagnosis.py
+tools/perf_smoke_test/diagnose_bad_commit.py
+tools/perf_smoke_test/bisection/diagnosis.py
 ```
 
 This runs after the first bad commit is found.
@@ -260,7 +260,7 @@ The structured plan was validated in two ways:
 A manual Docker-backed workflow now exists at:
 
 ```text
-.github/workflows/perf-gate-bisect.yaml
+.github/workflows/perf-smoke-bisect.yaml
 ```
 
 That workflow is intended to prove the next milestone: the same bisection flow
@@ -273,7 +273,7 @@ This is still a POC, not a production service.
 The biggest limitations are:
 
 - Docker/CI validation still needs to be run on a pushed branch with access to
-  the GPU fleet and perf-gate CI image.
+  the GPU fleet and perf-smoke CI image.
 - `local-source` works on the local L40S host but depends on the host
   environment and host-specific setup.
 - Retry behavior exists, but the policy is still simple and should be tuned as
@@ -291,7 +291,7 @@ The next work should make the POC more robust and easier to run repeatedly.
 `local-source` is useful for local demos, but production CI should likely use
 `docker-source` so the runtime environment is controlled and repeatable.
 
-The next step is to run `.github/workflows/perf-gate-bisect.yaml` on a
+The next step is to run `.github/workflows/perf-smoke-bisect.yaml` on a
 Docker-enabled GPU runner and confirm it finds the same known bad commit.
 
 ### 2. Tune Timeout And Retry Policy

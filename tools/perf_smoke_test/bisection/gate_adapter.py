@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Create bisection plans from existing perf-gate artifacts."""
+"""Create bisection plans from existing perf-smoke artifacts."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def find_regressed_gate_cells(
 ) -> list[dict]:
     """Return regressed cells from a phase-1 gate artifact directory."""
     rows: list[dict] = []
-    for result_path in sorted(artifacts_dir.rglob("perf_regression_gate_result.json")):
+    for result_path in sorted(artifacts_dir.rglob("perf_smoke_test_result.json")):
         artifact_dir = result_path.parent
         bench_result = load_bench_result(artifact_dir)
         task_id = str(bench_result["task_id"])

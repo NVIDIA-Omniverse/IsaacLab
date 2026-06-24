@@ -8,7 +8,7 @@
 
 The runner has two modes:
 
-* ``synthetic`` writes normal perf-gate artifacts via the stub benchmark. This is
+* ``synthetic`` writes normal perf-smoke artifacts via the stub benchmark. This is
   fast and useful for demos without a GPU.
 * ``docker-source`` checks out one candidate commit into an isolated clone,
   source-mounts it into a fixed IsaacLab CI image, runs one task/backend, and
@@ -506,7 +506,7 @@ def main() -> int:
         )
     _run_build_bench_result(task, artifact_dir, exit_code, wall_time_s, args.gate_config)
 
-    result_path = artifact_dir / "perf_regression_gate_result.json"
+    result_path = artifact_dir / "perf_smoke_test_result.json"
     bench_result = json.loads(result_path.read_text(encoding="utf-8"))
     bench_result["bisect_runner"] = {
         "commit_sha": commit_sha,

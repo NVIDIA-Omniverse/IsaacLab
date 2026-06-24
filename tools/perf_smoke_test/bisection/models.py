@@ -62,7 +62,7 @@ class RetryPolicy:
 
     max_attempts: int = 1
     retryable_notes: list[str] = field(
-        default_factory=lambda: ["candidate_timeout", "runner_command_failed", "missing_perf_regression_gate_result"]
+        default_factory=lambda: ["candidate_timeout", "runner_command_failed", "missing_perf_smoke_test_result"]
     )
     retry_delay_s: int = 0
 
@@ -115,8 +115,8 @@ class BisectionPlan:
             bad_ref=str(data["bad_ref"]),
             runner_command=str(data.get("runner_command", "")),
             gpu_model=str(data.get("gpu_model", "unknown-gpu")),
-            baselines_dir=str(data.get("baselines_dir", "tools/perf_regression_gate/local_baselines")),
-            gate_config=str(data.get("gate_config", "tools/perf_regression_gate/gate_config.json")),
+            baselines_dir=str(data.get("baselines_dir", "tools/perf_smoke_test/local_baselines")),
+            gate_config=str(data.get("gate_config", "tools/perf_smoke_test/gate_config.json")),
             runner=RunnerSpec.from_json(data.get("runner")),
             timeout=TimeoutPolicy.from_json(data.get("timeout")),
             retry=RetryPolicy.from_json(data.get("retry")),
