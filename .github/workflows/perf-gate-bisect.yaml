@@ -1,0 +1,243 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Performance Gate - Bisect Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      good_ref:
+        description: "Known-good ref/SHA. For the demo range, use the parent of the injected slowdown."
+        required: true
+        default: "0cfef92f22f6b64702f9984d263fbcf2fcb2444c"
+      bad_ref:
+        description: "Known-bad ref/SHA. For the demo range, use the bad branch tip."
+        required: true
+        default: "933ffc9e81e4bc536e9cc1a4aeb1b85890b61325"
+      task_id:
+        description: "Task id to bisect."
+        required: true
+        default: "Isaac-Cartpole-Direct"
+      backend_key:
+        description: "Backend key to bisect."
+        required: true
+        default: "physx"
+      image:
+        description: "Perf-gate CI image. Empty = PERF_GATE_CI_IMAGE or nvcr.io/nvidian/isaac-lab:latest-perf."
+        required: false
+        default: ""
+      candidate_timeout_s:
+        description: "Per-candidate timeout in seconds."
+        required: false
+        default: "900"
+      max_attempts:
+        description: "Attempts per candidate before returning SKIP."
+        required: false
+        default: "2"
+      retry_delay_s:
+        description: "Delay between retry attempts in seconds."
+        required: false
+        default: "10"
+      max_tests:
+        description: "Maximum midpoint commits to test."
+        required: false
+        default: "50"
+      baseline_samples:
+        description: "Local baseline samples to synthesize from the known-good run."
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+env:
+  NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+  CI_IMAGE_TAG: isaac-lab-ci:bisect-${{ github.run_id }}
+  OUTPUT_DIR: perf-output/bisection-ci
+
+jobs:
+  bisect:
+    name: Bisect perf regression
+    runs-on: ${{ fromJSON(vars.PERF_GATE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        lfs: true
+
+    - name: Fetch all branch refs
+      run: |
+        set -euo pipefail
+        git fetch --no-tags origin "+refs/heads/*:refs/remotes/origin/*" || \
+          echo "::warning::Could not fetch all branch refs; explicit SHAs may still resolve"
+
+    - name: Pull prebuilt CI image
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+        DEFAULT_IMAGE: ${{ vars.PERF_GATE_CI_IMAGE || 'nvcr.io/nvidian/isaac-lab:latest-perf' }}
+      run: |
+        set -euo pipefail
+        CI_IMAGE_REF="${INPUT_IMAGE:-${DEFAULT_IMAGE}}"
+
+        DOCKER_CONFIG_DIR="$(mktemp -d)"
+        echo '{"credsStore":""}' > "${DOCKER_CONFIG_DIR}/config.json"
+        export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+
+        REGISTRY="${CI_IMAGE_REF%%/*}"
+        case "${REGISTRY}" in
+          nvcr.io)
+            if [ -n "${NGC_API_KEY:-}" ]; then
+              echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+            else
+              echo "::warning::NGC_API_KEY not set; attempting anonymous pull from nvcr.io"
+            fi
+            ;;
+          *)
+            echo "::notice::No known login for registry '${REGISTRY}'; attempting anonymous pull"
+            ;;
+        esac
+
+        docker pull "${CI_IMAGE_REF}"
+        docker tag "${CI_IMAGE_REF}" "${CI_IMAGE_TAG}"
+        rm -rf "${DOCKER_CONFIG_DIR}"
+
+    - name: Detect GPU
+      id: gpu
+      run: |
+        set -euo pipefail
+        GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+        if [ -z "${GPU_MODEL}" ]; then
+          GPU_MODEL="unknown-gpu"
+        fi
+        echo "gpu_model=${GPU_MODEL}" >> "$GITHUB_OUTPUT"
+
+    - name: Run known-good cell for local baseline
+      run: |
+        set -euo pipefail
+        ./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+          --mode docker-source \
+          --commit "${{ inputs.good_ref }}" \
+          --task_id "${{ inputs.task_id }}" \
+          --backend_key "${{ inputs.backend_key }}" \
+          --artifact_dir "${OUTPUT_DIR}/good-artifacts/${{ inputs.task_id }}/${{ inputs.backend_key }}" \
+          --gpu_model "${{ steps.gpu.outputs.gpu_model }}" \
+          --image "${CI_IMAGE_TAG}" \
+          --source_dir "${OUTPUT_DIR}/source/good" \
+          --jit_cache "${OUTPUT_DIR}/jit-cache" \
+          --kit_cache "${OUTPUT_DIR}/kit-cache"
+
+    - name: Seed local bisection baseline
+      env:
+        BASELINE_SAMPLES: ${{ inputs.baseline_samples }}
+        TASK_ID: ${{ inputs.task_id }}
+        BACKEND_KEY: ${{ inputs.backend_key }}
+        GPU_MODEL: ${{ steps.gpu.outputs.gpu_model }}
+        GOOD_REF: ${{ inputs.good_ref }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json
+        import os
+        import sys
+        from pathlib import Path
+
+        repo = Path.cwd()
+        sys.path.insert(0, str(repo / "tools" / "perf_regression_gate"))
+        from baseline_manager import make_sample_metadata, update_baseline
+        from gpu_identity import canonical_gpu_model
+
+        output_dir = repo / os.environ["OUTPUT_DIR"]
+        result_path = output_dir / "good-artifacts" / os.environ["TASK_ID"] / os.environ["BACKEND_KEY"] / "perf_regression_gate_result.json"
+        bench_result = json.loads(result_path.read_text(encoding="utf-8"))
+        fps = float(bench_result["raw_fps_mean"])
+        gpu_model = canonical_gpu_model(os.environ["GPU_MODEL"])
+        n_samples = max(1, int(os.environ["BASELINE_SAMPLES"]))
+        for idx in range(n_samples):
+            # Slight spread avoids a zero-MAD baseline while preserving the known-good center.
+            sample_fps = fps * (1.0 + (idx - (n_samples // 2)) * 0.002)
+            metadata = make_sample_metadata(
+                gpu_model=gpu_model,
+                task_id=os.environ["TASK_ID"],
+                backend=os.environ["BACKEND_KEY"],
+                fps=sample_fps,
+                bench_result=bench_result,
+                target_branch="bisection-ci",
+                trusted_source="bisection_ci_good_ref",
+                commit_sha=os.environ["GOOD_REF"],
+                run_group_id=f"bisection-ci-good-{idx}",
+            )
+            update_baseline(
+                output_dir / "local-baselines",
+                gpu_model,
+                os.environ["TASK_ID"],
+                os.environ["BACKEND_KEY"],
+                sample_fps,
+                sample_metadata=metadata,
+            )
+        PY
+
+    - name: Run bad cell to create gate artifact
+      run: |
+        set -euo pipefail
+        ./isaaclab.sh -p tools/perf_regression_gate/bisect_single_commit_runner.py \
+          --mode docker-source \
+          --commit "${{ inputs.bad_ref }}" \
+          --task_id "${{ inputs.task_id }}" \
+          --backend_key "${{ inputs.backend_key }}" \
+          --artifact_dir "${OUTPUT_DIR}/gate-artifacts/${{ inputs.task_id }}/${{ inputs.backend_key }}" \
+          --gpu_model "${{ steps.gpu.outputs.gpu_model }}" \
+          --image "${CI_IMAGE_TAG}" \
+          --source_dir "${OUTPUT_DIR}/source/bad" \
+          --jit_cache "${OUTPUT_DIR}/jit-cache" \
+          --kit_cache "${OUTPUT_DIR}/kit-cache"
+
+    - name: Generate structured bisection plan
+      run: |
+        set -euo pipefail
+        ./isaaclab.sh -p tools/perf_regression_gate/bisection_plan_from_gate.py \
+          --artifacts_dir "${OUTPUT_DIR}/gate-artifacts" \
+          --good_ref "${{ inputs.good_ref }}" \
+          --bad_ref "${{ inputs.bad_ref }}" \
+          --task_id "${{ inputs.task_id }}" \
+          --backend_key "${{ inputs.backend_key }}" \
+          --gpu_model "${{ steps.gpu.outputs.gpu_model }}" \
+          --baselines_dir "${OUTPUT_DIR}/local-baselines" \
+          --output_dir "${OUTPUT_DIR}/plan" \
+          --runner_mode docker-source \
+          --image "${CI_IMAGE_TAG}" \
+          --candidate_timeout_s "${{ inputs.candidate_timeout_s }}" \
+          --max_attempts "${{ inputs.max_attempts }}" \
+          --retry_delay_s "${{ inputs.retry_delay_s }}"
+
+    - name: Run bisection harness
+      run: |
+        set -euo pipefail
+        ./isaaclab.sh -p tools/perf_regression_gate/bisection_harness.py run \
+          --plan "${OUTPUT_DIR}/plan/plan.json" \
+          --output_dir "${OUTPUT_DIR}/run" \
+          --max_tests "${{ inputs.max_tests }}"
+
+    - name: Diagnose first bad commit
+      if: always()
+      run: |
+        set -euo pipefail
+        if [ -f "${OUTPUT_DIR}/run/summary.json" ]; then
+          ./isaaclab.sh -p tools/perf_regression_gate/diagnose_bad_commit.py \
+            --run_dir "${OUTPUT_DIR}/run"
+        else
+          echo "::warning::No bisection summary found; skipping diagnosis"
+        fi
+
+    - name: Upload bisection artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: perf-gate-bisection-${{ github.run_id }}
+        path: perf-output/bisection-ci/
+        retention-days: 14
+        if-no-files-found: warn
