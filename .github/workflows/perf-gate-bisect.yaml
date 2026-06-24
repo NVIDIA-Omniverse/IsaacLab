@@ -169,7 +169,6 @@ jobs:
                 target_branch="bisection-ci",
                 trusted_source="bisection_ci_good_ref",
                 commit_sha=os.environ["GOOD_REF"],
-                run_group_id=f"bisection-ci-good-{idx}",
             )
             update_baseline(
                 output_dir / "local-baselines",
@@ -238,6 +237,13 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: perf-gate-bisection-${{ github.run_id }}
-        path: perf-output/bisection-ci/
+        # Only the runner-owned result dirs. The docker jit/kit caches are
+        # written root-owned inside the container and would fail to scan.
+        path: |
+          perf-output/bisection-ci/good-artifacts/
+          perf-output/bisection-ci/gate-artifacts/
+          perf-output/bisection-ci/local-baselines/
+          perf-output/bisection-ci/plan/
+          perf-output/bisection-ci/run/
         retention-days: 14
         if-no-files-found: warn
