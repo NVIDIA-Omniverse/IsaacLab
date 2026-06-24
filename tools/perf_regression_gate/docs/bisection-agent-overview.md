@@ -212,4 +212,3 @@ data.
 4. **Promote the workflow** to the standard entry point: gate finds a regression,
   maintainer launches bisection from the failed artifact, and a GPU runner
    reports the first bad commit plus diagnosis.
-
