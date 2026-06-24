@@ -37,26 +37,12 @@ def _format_template(value: str | None, context: dict[str, str]) -> str | None:
     return value.format(**context) if value else None
 
 
-def _legacy_runner_command(plan: BisectionPlan, output_dir: Path, commit_sha: str, artifact_dir: Path) -> str:
-    """Format the legacy runner command for one candidate."""
-    if not plan.runner_command.strip():
-        raise ValueError("runner_command is required when plan.runner is not set.")
-    return plan.runner_command.format(
-        commit_sha=shlex.quote(commit_sha),
-        task_id=shlex.quote(plan.task_id),
-        backend_key=shlex.quote(plan.backend_key),
-        artifact_dir=shlex.quote(str(artifact_dir)),
-        repo_root=shlex.quote(str(_REPO_ROOT)),
-        output_dir=shlex.quote(str(output_dir)),
-    )
-
-
 def format_runner_command(
     plan: BisectionPlan, output_dir: Path, commit_sha: str, artifact_dir: Path
-) -> list[str] | str:
+) -> list[str]:
     """Build the runner command for one candidate."""
     if plan.runner is None:
-        return _legacy_runner_command(plan, output_dir, commit_sha, artifact_dir)
+        raise ValueError("plan.runner is required to run a bisection candidate.")
 
     context = _template_context(output_dir, commit_sha, artifact_dir, plan)
     runner = plan.runner

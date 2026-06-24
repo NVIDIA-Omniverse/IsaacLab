@@ -93,7 +93,6 @@ class BisectionPlan:
     gpu_model: str
     baselines_dir: str
     gate_config: str
-    runner_command: str = ""
     runner: RunnerSpec | None = None
     timeout: TimeoutPolicy = field(default_factory=TimeoutPolicy)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
@@ -113,7 +112,6 @@ class BisectionPlan:
             backend_key=str(data["backend_key"]),
             good_ref=str(data["good_ref"]),
             bad_ref=str(data["bad_ref"]),
-            runner_command=str(data.get("runner_command", "")),
             gpu_model=str(data.get("gpu_model", "unknown-gpu")),
             baselines_dir=str(data.get("baselines_dir", "tools/perf_smoke_test/local_baselines")),
             gate_config=str(data.get("gate_config", "tools/perf_smoke_test/gate_config.json")),
@@ -122,7 +120,7 @@ class BisectionPlan:
             retry=RetryPolicy.from_json(data.get("retry")),
             source_gate_artifact_dir=data.get("source_gate_artifact_dir"),
             source_gate_result=dict(data.get("source_gate_result") or {}),
-            schema_version=int(data.get("schema_version", 1)),
+            schema_version=int(data.get("schema_version", 2)),
         )
 
 

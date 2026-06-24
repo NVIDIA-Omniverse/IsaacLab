@@ -27,14 +27,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--good_ref", required=True)
     parser.add_argument("--bad_ref", required=True)
     parser.add_argument(
-        "--runner_command",
-        default="",
-        help="Legacy command template. Prefer structured --runner_mode options for new plans.",
-    )
-    parser.add_argument(
         "--runner_mode",
         choices=("synthetic", "local-source", "docker-source"),
-        default=None,
+        required=True,
         help="Structured runner mode for the generated plan.",
     )
     parser.add_argument("--image", default=None, help="Docker image tag for --runner_mode docker-source.")
@@ -58,8 +53,6 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    if not args.runner_command and not args.runner_mode:
-        raise ValueError("Either --runner_command or --runner_mode is required.")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     regressions = find_regressed_gate_cells(
         artifacts_dir=args.artifacts_dir,
@@ -78,23 +71,20 @@ def main() -> int:
         return 2
 
     selected = regressions[0]
-    runner = None
-    if args.runner_mode:
-        runner = RunnerSpec(
-            mode=args.runner_mode,
-            image=args.image,
-            source_dir=args.source_dir,
-            jit_cache=args.jit_cache,
-            kit_cache=args.kit_cache,
-            local_env_dir=args.local_env_dir,
-            ld_preload=args.ld_preload,
-            extra_args=list(args.runner_extra_arg),
-        )
+    runner = RunnerSpec(
+        mode=args.runner_mode,
+        image=args.image,
+        source_dir=args.source_dir,
+        jit_cache=args.jit_cache,
+        kit_cache=args.kit_cache,
+        local_env_dir=args.local_env_dir,
+        ld_preload=args.ld_preload,
+        extra_args=list(args.runner_extra_arg),
+    )
     plan = make_plan_from_gate_cell(
         gate_cell=selected,
         good_ref=args.good_ref,
         bad_ref=args.bad_ref,
-        runner_command=args.runner_command,
         runner=runner,
         timeout=TimeoutPolicy(candidate_timeout_s=args.candidate_timeout_s),
         retry=RetryPolicy(max_attempts=max(1, args.max_attempts), retry_delay_s=max(0, args.retry_delay_s)),
