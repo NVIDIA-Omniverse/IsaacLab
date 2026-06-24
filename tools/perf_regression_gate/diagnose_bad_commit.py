@@ -28,6 +28,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     diagnosis = write_diagnosis(args.run_dir)
+    if diagnosis.get("status") == "no_first_bad_commit":
+        print(f"[diagnose_bad_commit] no first bad commit identified -> {args.run_dir / 'diagnosis.md'}")
+        return 0
     first_bad = diagnosis["first_bad_commit"]["commit_sha"][:12]
     print(f"[diagnose_bad_commit] wrote diagnosis for {first_bad} -> {args.run_dir / 'diagnosis.md'}")
     return 0

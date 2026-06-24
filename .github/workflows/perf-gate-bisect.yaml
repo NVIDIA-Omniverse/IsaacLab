@@ -127,9 +127,9 @@ jobs:
           --artifact_dir "${OUTPUT_DIR}/good-artifacts/${{ inputs.task_id }}/${{ inputs.backend_key }}" \
           --gpu_model "${{ steps.gpu.outputs.gpu_model }}" \
           --image "${CI_IMAGE_TAG}" \
-          --source_dir "${OUTPUT_DIR}/source/good" \
-          --jit_cache "${OUTPUT_DIR}/jit-cache" \
-          --kit_cache "${OUTPUT_DIR}/kit-cache"
+          --source_dir "${OUTPUT_DIR}/cells/good/source" \
+          --jit_cache "${OUTPUT_DIR}/cells/good/jit-cache" \
+          --kit_cache "${OUTPUT_DIR}/cells/good/kit-cache"
 
     - name: Seed local bisection baseline
       env:
@@ -191,9 +191,9 @@ jobs:
           --artifact_dir "${OUTPUT_DIR}/gate-artifacts/${{ inputs.task_id }}/${{ inputs.backend_key }}" \
           --gpu_model "${{ steps.gpu.outputs.gpu_model }}" \
           --image "${CI_IMAGE_TAG}" \
-          --source_dir "${OUTPUT_DIR}/source/bad" \
-          --jit_cache "${OUTPUT_DIR}/jit-cache" \
-          --kit_cache "${OUTPUT_DIR}/kit-cache"
+          --source_dir "${OUTPUT_DIR}/cells/bad/source" \
+          --jit_cache "${OUTPUT_DIR}/cells/bad/jit-cache" \
+          --kit_cache "${OUTPUT_DIR}/cells/bad/kit-cache"
 
     - name: Generate structured bisection plan
       run: |
@@ -209,6 +209,9 @@ jobs:
           --output_dir "${OUTPUT_DIR}/plan" \
           --runner_mode docker-source \
           --image "${CI_IMAGE_TAG}" \
+          --source_dir "${OUTPUT_DIR}/candidates/{commit_sha}/source" \
+          --jit_cache "${OUTPUT_DIR}/candidates/{commit_sha}/jit-cache" \
+          --kit_cache "${OUTPUT_DIR}/candidates/{commit_sha}/kit-cache" \
           --candidate_timeout_s "${{ inputs.candidate_timeout_s }}" \
           --max_attempts "${{ inputs.max_attempts }}" \
           --retry_delay_s "${{ inputs.retry_delay_s }}"
@@ -232,13 +235,25 @@ jobs:
           echo "::warning::No bisection summary found; skipping diagnosis"
         fi
 
+    - name: Normalize artifact ownership
+      if: always()
+      run: |
+        set -uo pipefail
+        # Benchmarks run as root inside the container and leave root-owned files
+        # behind. Hand ownership back to the runner user so the upload step can
+        # scan the result directories.
+        docker run --rm --entrypoint bash \
+          -v "${GITHUB_WORKSPACE}/perf-output/bisection-ci:/work" \
+          "${CI_IMAGE_TAG}" -c "chown -R $(id -u):$(id -g) /work" \
+          || echo "::warning::Could not normalize artifact ownership; upload may skip unreadable paths"
+
     - name: Upload bisection artifacts
       if: always()
       uses: actions/upload-artifact@v7
       with:
         name: perf-gate-bisection-${{ github.run_id }}
-        # Only the runner-owned result dirs. The docker jit/kit caches are
-        # written root-owned inside the container and would fail to scan.
+        # Result/report dirs only. Per-candidate source clones and JIT/Kit caches
+        # live under cells/ and candidates/ and are intentionally not uploaded.
         path: |
           perf-output/bisection-ci/good-artifacts/
           perf-output/bisection-ci/gate-artifacts/

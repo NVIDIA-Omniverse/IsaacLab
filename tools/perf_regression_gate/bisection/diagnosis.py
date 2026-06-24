@@ -83,7 +83,23 @@ def build_diagnosis(run_dir: Path) -> dict[str, Any]:
     plan = read_json(run_dir / "plan.resolved.json")
     first_bad = summary.get("suspected_first_bad_commit")
     if not first_bad:
-        raise RuntimeError("summary.json does not contain suspected_first_bad_commit")
+        return {
+            "schema_version": 1,
+            "status": "no_first_bad_commit",
+            "task_id": plan.get("task_id"),
+            "backend_key": plan.get("backend_key"),
+            "summary_status": summary.get("status"),
+            "summary_reason": summary.get("reason"),
+            "last_good_commit": summary.get("last_good_commit"),
+            "good_ref": summary.get("good_ref"),
+            "bad_ref": summary.get("bad_ref"),
+            "tested_commits": summary.get("tested_commits", []),
+            "note": (
+                "Bisection completed without identifying a first bad commit. This usually means every "
+                "tested candidate classified as GOOD or SKIP. See summary.json and results/*.json for "
+                "per-candidate verdicts."
+            ),
+        }
     first_bad = resolve_ref(_REPO_ROOT, str(first_bad))
     parent = _parent_of(first_bad)
     if parent is None:
@@ -135,6 +151,26 @@ def build_diagnosis(run_dir: Path) -> dict[str, Any]:
 
 def render_markdown(diagnosis: dict[str, Any]) -> str:
     """Render a diagnosis payload as Markdown."""
+    if diagnosis.get("status") == "no_first_bad_commit":
+        return "\n".join(
+            [
+                "# Bisection Diagnosis",
+                "",
+                "No first bad commit was identified.",
+                "",
+                f"- Task: `{diagnosis.get('task_id')}`",
+                f"- Backend: `{diagnosis.get('backend_key')}`",
+                f"- Summary status: {diagnosis.get('summary_status')}",
+                f"- Summary reason: {diagnosis.get('summary_reason')}",
+                f"- Last tested good commit: `{str(diagnosis.get('last_good_commit') or 'unknown')[:12]}`",
+                f"- Good ref: `{str(diagnosis.get('good_ref') or 'unknown')[:12]}`",
+                f"- Bad ref: `{str(diagnosis.get('bad_ref') or 'unknown')[:12]}`",
+                f"- Tested commits: {len(diagnosis.get('tested_commits', []))}",
+                "",
+                diagnosis.get("note", ""),
+                "",
+            ]
+        )
     first_bad = diagnosis["first_bad_commit"]
     parent = diagnosis["parent_commit"]
     metrics = diagnosis["metrics"]
