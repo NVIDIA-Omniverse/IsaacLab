@@ -7,6 +7,19 @@
 
 """Launch Isaac Sim Simulator first."""
 
+# [DEMO] Simulated environment regression for the perf smoke-test demo (NOT FOR MERGE).
+# Mirrors a real breakage class: a PR adds ``import tomllib`` (stdlib only on
+# Python 3.11+) while the benchmark image still runs Python 3.10, so every task
+# crashes at import before producing perf data -> gate verdict HARD_FAILURE.
+# The perf-gate image is Python 3.11 (Isaac Sim 6.0.0) where ``tomllib`` imports
+# cleanly, so reproduce the Python 3.10 failure deterministically here instead of
+# relying on the interpreter version.
+import sys as _demo_sys
+
+if _demo_sys.version_info >= (3, 11):
+    raise ModuleNotFoundError("No module named 'tomllib'")
+import tomllib  # noqa: F401  # real failure path on a Python 3.10 environment
+
 import argparse
 import contextlib
 import os

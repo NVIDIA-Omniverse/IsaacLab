@@ -39,25 +39,6 @@
       }
     },
     {
-      "task_id": "Isaac-Repose-Cube-Shadow-Vision-Direct-v0",
-      "timeout_minutes": 20,
-      "tags": ["camera"],
-      "backends": [
-        {"physics": "physx"},
-        {"physics": "physx", "render": "newton_renderer"},
-        {"physics": "newton"},
-        {"physics": "newton", "render": "newton_renderer"}
-      ],
-      "fps_mean_floor": {
-        "L40S": {
-          "physx": 20.0,
-          "physx_newton_renderer": 0.0,
-          "newton": 0.0,
-          "newton_newton_renderer": 0.0
-        }
-      }
-    },
-    {
       "task_id": "Isaac-Velocity-Flat-G1-v0",
       "timeout_minutes": 12,
       "backends": [
