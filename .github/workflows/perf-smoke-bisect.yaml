@@ -5,6 +5,9 @@
 
 name: Performance Smoke Test - Bisect Regression
 
+# Manual/optional bisection path. The default developer workflow is local-first
+# via tools/perf_smoke_test/bisection_harness.py run-local.
+
 on:
   workflow_dispatch:
     inputs:

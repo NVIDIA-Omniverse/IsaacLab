@@ -83,6 +83,36 @@ class RetryPolicy:
 
 
 @dataclass(frozen=True)
+class MeasurementPolicy:
+    """Local paired-reference measurement settings."""
+
+    reference_runs: int = 3
+    max_reference_runs: int = 7
+    candidate_runs: int = 1
+    max_candidate_runs: int = 3
+    min_regression_pct: float = 5.0
+    gray_zone_pct: float = 1.0
+    reference_noise_multiplier: float = 2.0
+    max_reference_spread_pct: float = 10.0
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any] | None) -> MeasurementPolicy:
+        """Build measurement policy from JSON."""
+        if not data:
+            return cls()
+        return cls(
+            reference_runs=max(1, int(data.get("reference_runs", 3))),
+            max_reference_runs=max(1, int(data.get("max_reference_runs", 7))),
+            candidate_runs=max(1, int(data.get("candidate_runs", 1))),
+            max_candidate_runs=max(1, int(data.get("max_candidate_runs", 3))),
+            min_regression_pct=max(0.0, float(data.get("min_regression_pct", 5.0))),
+            gray_zone_pct=max(0.0, float(data.get("gray_zone_pct", 1.0))),
+            reference_noise_multiplier=max(0.0, float(data.get("reference_noise_multiplier", 2.0))),
+            max_reference_spread_pct=max(0.0, float(data.get("max_reference_spread_pct", 10.0))),
+        )
+
+
+@dataclass(frozen=True)
 class BisectionPlan:
     """Plan for bisecting one regressed IsaacLab task/backend cell."""
 
@@ -96,6 +126,7 @@ class BisectionPlan:
     runner: RunnerSpec | None = None
     timeout: TimeoutPolicy = field(default_factory=TimeoutPolicy)
     retry: RetryPolicy = field(default_factory=RetryPolicy)
+    measurement: MeasurementPolicy = field(default_factory=MeasurementPolicy)
     source_gate_artifact_dir: str | None = None
     source_gate_result: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 2
@@ -118,6 +149,7 @@ class BisectionPlan:
             runner=RunnerSpec.from_json(data.get("runner")),
             timeout=TimeoutPolicy.from_json(data.get("timeout")),
             retry=RetryPolicy.from_json(data.get("retry")),
+            measurement=MeasurementPolicy.from_json(data.get("measurement")),
             source_gate_artifact_dir=data.get("source_gate_artifact_dir"),
             source_gate_result=dict(data.get("source_gate_result") or {}),
             schema_version=int(data.get("schema_version", 2)),
@@ -155,6 +187,7 @@ class CandidateEvaluation:
     regression_pct: float | None = None
     baseline_sample_count: int = 0
     threshold_source: str | None = None
+    comparison_mode: str | None = None
     note: str | None = None
     command: str | None = None
     attempt_count: int = 1
@@ -180,6 +213,8 @@ class BisectionSummary:
     last_good_commit: str | None
     bad_ref: str
     good_ref: str
+    comparison_mode: str | None = None
+    reference_stats: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the summary to JSON."""
