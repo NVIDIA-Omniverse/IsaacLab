@@ -3,7 +3,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Script to benchmark non-RL environment."""
+"""Script to benchmark the step throughput of a non-RL environment.
+
+Launches a task, steps it for a fixed number of frames, and records per-step
+frametimes so downstream tooling can compute effective environment FPS.
+"""
 
 """Launch Isaac Sim Simulator first."""
 
