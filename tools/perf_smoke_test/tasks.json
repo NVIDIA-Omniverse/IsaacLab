@@ -27,6 +27,18 @@
       }
     },
     {
+      "task_id": "Isaac-Factory-GearMesh-Direct-v0",
+      "timeout_minutes": 15,
+      "backends": [
+        {"physics": "physx"}
+      ],
+      "fps_mean_floor": {
+        "L40S": {
+          "physx": 30.0
+        }
+      }
+    },
+    {
       "task_id": "Isaac-Velocity-Flat-G1-v0",
       "timeout_minutes": 12,
       "backends": [
