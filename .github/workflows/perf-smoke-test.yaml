@@ -605,7 +605,69 @@ jobs:
       run: |
         python3 tools/perf_smoke_test/github_gate_context.py
 
-    - name: Run aggregate oracle
+    - name: Run initial aggregate oracle
+      id: initial_aggregate
+      run: |
+        GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
+        if [[ -z "${GPU_MODEL}" ]]; then
+          GPU_MODEL="unknown-gpu"
+        fi
+        INITIAL_VERDICTS_FILE="${{ github.workspace }}/initial_verdicts.json"
+        python3 tools/perf_smoke_test/aggregate.py \
+          --artifacts_dir artifacts/ \
+          --gpu_model "${GPU_MODEL}" \
+          --gate_config tools/perf_smoke_test/gate_config.json \
+          --baseline_branch perf-baselines \
+          --baseline_remote origin \
+          --baseline_push_retries 3 \
+          --base_sha "${{ steps.gate_context.outputs.base_sha }}" \
+          --target_branch "${{ steps.gate_context.outputs.target_branch }}" \
+          --source_branch "${{ steps.gate_context.outputs.source_branch }}" \
+          --allow_baseline_update "false" \
+          --trusted_source "${{ steps.gate_context.outputs.trusted_source }}" \
+          --verdicts_file "${INITIAL_VERDICTS_FILE}"
+
+    - name: Confirm BLOCK cells
+      run: |
+        set -euo pipefail
+        INITIAL_VERDICTS_FILE="${{ github.workspace }}/initial_verdicts.json"
+        BLOCK_COUNT="$(python3 - <<'PY'
+        import json
+        from pathlib import Path
+        records = json.loads(Path("initial_verdicts.json").read_text())
+        print(sum(1 for record in records if record.get("verdict") == "BLOCK"))
+        PY
+        )"
+        if [ "${BLOCK_COUNT}" = "0" ]; then
+          echo "::notice::No BLOCK cells found; skipping confirmation reruns"
+          exit 0
+        fi
+        echo "::notice::Confirming ${BLOCK_COUNT} BLOCK cell(s) with two additional reruns each"
+
+        DOCKER_CONFIG_DIR="$(mktemp -d)"
+        echo '{"credsStore":""}' > "${DOCKER_CONFIG_DIR}/config.json"
+        export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+
+        CI_IMAGE_REF="${{ vars.PERF_SMOKE_CI_IMAGE || 'nvcr.io/nvidian/isaac-lab:latest-perf' }}"
+        REGISTRY="${CI_IMAGE_REF%%/*}"
+        if [ "${REGISTRY}" = "nvcr.io" ] && [ -n "${NGC_API_KEY:-}" ]; then
+          echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+        fi
+        docker pull "${CI_IMAGE_REF}"
+        docker tag "${CI_IMAGE_REF}" "${{ env.CI_IMAGE_TAG }}"
+        rm -rf "${DOCKER_CONFIG_DIR}"
+
+        mkdir -p "${{ github.workspace }}/jit-cache/warp" "${{ github.workspace }}/jit-cache/nv"
+        mkdir -p "${{ github.workspace }}/kit-cache"
+        chmod -R a+rwX "${{ github.workspace }}" 2>/dev/null || true
+
+        python3 tools/perf_smoke_test/confirm_block_reruns.py \
+          --verdicts_file "${INITIAL_VERDICTS_FILE}" \
+          --workspace "${{ github.workspace }}" \
+          --ci_image_tag "${{ env.CI_IMAGE_TAG }}" \
+          --reruns 2
+
+    - name: Run final aggregate oracle
       id: aggregate
       run: |
         GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
@@ -654,7 +716,7 @@ jobs:
             core.info('verdict_summary.md not found; posting placeholder');
           }
           const marker = '<!-- perf-smoke-test-verdict -->';
-          const body = `${marker}\n## Performance Smoke Test\n\n${table}\n\n_Updated for ${context.sha.slice(0, 8)} · [run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})_`;
+          const body = `${marker}\n${table}\n\n_Updated for ${context.sha.slice(0, 8)} · [run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})_`;
           const { owner, repo } = context.repo;
           const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
           const existing = comments.find(c => c.body && c.body.includes(marker));

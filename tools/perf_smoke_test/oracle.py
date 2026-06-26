@@ -57,6 +57,7 @@ class OracleResult:
     block_threshold_fps: float | None = None
     hard_floor_fps: float | None = None
     min_block_regression_pct: float = MIN_BLOCK_REGRESSION_PCT
+    baseline_noise_pct: float | None = None
     note: str | None = None
 
 
@@ -180,9 +181,20 @@ def compare(
     fps_p5 = _percentile(sorted_filtered, 5.0)
     fps_p95 = _percentile(sorted_filtered, 95.0)
 
+    confirmation_attempts = [
+        float(value)
+        for value in bench_result.get("confirmation_fps_attempts", [])
+        if isinstance(value, (int, float))
+    ]
+    if len(confirmation_attempts) >= 3:
+        mean_fps = statistics.median(confirmation_attempts)
+
     baseline_fps = baseline.median_fps if baseline is not None else None
     baseline_sample_count = baseline.sample_count if baseline is not None else 0
     baseline_source = baseline.source if baseline is not None else "none"
+    baseline_noise_pct = None
+    if baseline is not None and baseline.median_fps > 0.0:
+        baseline_noise_pct = baseline.mad_fps / baseline.median_fps * 100.0
     regression_pct = None
     if baseline_fps:
         regression_pct = ((mean_fps - baseline_fps) / baseline_fps) * 100.0
@@ -223,6 +235,13 @@ def compare(
         verdict = OracleVerdict.WARN
         note = note or "was_retried"
 
+    if confirmation_attempts:
+        if verdict == OracleVerdict.BLOCK:
+            note = note or f"block_confirmed(n={len(confirmation_attempts)})"
+        else:
+            verdict = OracleVerdict.WARN
+            note = f"block_not_reproduced(n={len(confirmation_attempts)})"
+
     return OracleResult(
         verdict=verdict,
         bisect_verdict=_bisect_verdict(verdict, was_retried, failure_phase),
@@ -246,5 +265,6 @@ def compare(
         block_threshold_fps=block_threshold,
         hard_floor_fps=hard_floor_fps,
         min_block_regression_pct=float(min_block_regression_pct),
+        baseline_noise_pct=baseline_noise_pct,
         note=note,
     )
