@@ -69,6 +69,7 @@ def _run_confirm_attempt(
 ) -> float | None:
     attempt_dir = artifact_dir / f"confirm_attempt_{attempt}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
+    attempt_dir = attempt_dir.resolve()
     log_file = attempt_dir / "benchmark.log"
     timeout_s = int(launch_config.get("timeout_minutes", 12)) * 60
     container_name = f"perf-confirm-{_safe_name(task_id)}-{_safe_name(backend_key)}-{int(time.time())}-{attempt}"
