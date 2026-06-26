@@ -1,6 +1,118 @@
 Changelog
 ---------
 
+7.3.0 (2026-06-26)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added the mass schema-fragment API: the :class:`~isaaclab.sim.schemas.MassFragment` marker and
+  :class:`~isaaclab.sim.schemas.MassCfg` (writes ``physics:mass`` / ``physics:density`` via
+  ``UsdPhysics.MassAPI``). The legacy :class:`~isaaclab.sim.schemas.MassPropertiesCfg` remains the
+  canonical name and continues to work unchanged.
+* Added :func:`~isaaclab.sim.schemas.apply_mass_properties`, which applies a list of mass fragments
+  with ``UsdPhysics.MassAPI`` as the implicit anchor.
+* Added the collision schema-fragment API: the
+  :class:`~isaaclab.sim.schemas.CollisionFragment` marker and
+  :class:`~isaaclab.sim.schemas.UsdPhysicsCollisionCfg` (the ``physics:collisionEnabled``
+  single-namespace fragment). Each fragment carries ``_usd_namespace`` / ``_usd_applied_schema``
+  metadata and a ``func`` applier so a prim can carry collision properties from multiple USD
+  namespaces at once.
+* Added :func:`~isaaclab.sim.schemas.apply_collision_properties`, which applies a list of
+  collision fragments with ``UsdPhysics.CollisionAPI`` as the implicit anchor.
+
+Changed
+^^^^^^^
+
+* Changed automatic ``rtx`` launch-time renderer resolution to support the
+  ``renderer=rtx`` selector.
+* Changed the spawner ``mass_props`` slot
+  (:attr:`~isaaclab.sim.spawners.RigidObjectSpawnerCfg.mass_props`) to also accept a single
+  :class:`~isaaclab.sim.schemas.MassFragment` or a list of them. Legacy
+  :class:`~isaaclab.sim.schemas.MassPropertiesCfg` cfgs continue to work through a transition bridge
+  in the spawn writers.
+* Changed the spawner ``collision_props`` slot
+  (:attr:`~isaaclab.sim.spawners.RigidObjectSpawnerCfg.collision_props`) and the mesh-converter
+  ``collision_props`` slot to also accept a list of
+  :class:`~isaaclab.sim.schemas.CollisionFragment` fragments. Legacy single cfgs continue to work
+  through a transition bridge in the spawn writers.
+
+Fixed
+^^^^^
+
+* Fixed :func:`~isaaclab.sim.schemas.apply_mass_properties` to raise ``ValueError`` on an invalid
+  prim path and to aggregate per-fragment results instead of always returning ``True``, matching
+  :func:`~isaaclab.sim.schemas.apply_rigid_body_properties`.
+* Fixed the spawn writers so an empty ``mass_props`` list is a harmless no-op rather than being
+  forwarded to :func:`~isaaclab.sim.schemas.define_mass_properties` as an unexpected list.
+
+
+7.2.0 (2026-06-25)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added :func:`~isaaclab.utils.renderers.isaac_rtx_per_env_scene_partition_enabled` to
+  query whether per-environment Isaac RTX scene partitioning is enabled. Set
+  ``ISAAC_LAB_ENABLE_ISAAC_RTX_PER_ENV_SCENE_PARTITION=1`` to enable authoring of
+  ``primvars:omni:scenePartition`` and ``omni:scenePartition`` on the USD stage.
+* Added the single-namespace schema-fragment API: :class:`~isaaclab.sim.schemas.SchemaFragment`,
+  the :class:`~isaaclab.sim.schemas.RigidBodyFragment` marker, and
+  :class:`~isaaclab.sim.schemas.UsdPhysicsRigidBodyCfg`. Each fragment carries
+  ``_usd_namespace`` / ``_usd_applied_schema`` metadata and a ``func`` applier so a prim can
+  carry rigid-body properties from multiple USD namespaces at once.
+* Added :func:`~isaaclab.sim.schemas.apply_namespaced` (generic fragment writer) and
+  :func:`~isaaclab.sim.schemas.apply_rigid_body_properties` (applies a list of rigid-body
+  fragments with ``UsdPhysics.RigidBodyAPI`` as the implicit anchor).
+
+Changed
+^^^^^^^
+
+* Changed the spawner ``rigid_props`` slot
+  (:attr:`~isaaclab.sim.spawners.RigidObjectSpawnerCfg.rigid_props`) to also accept a list of
+  :class:`~isaaclab.sim.schemas.RigidBodyFragment` fragments. Legacy single cfgs continue to
+  work through a transition bridge in the spawn writers.
+
+Fixed
+^^^^^
+
+* Fixed :func:`~isaaclab.sim.save_stage` rewriting URI asset paths, such as
+  DomeLight texture URLs, into relative filesystem paths.
+
+
+7.1.0 (2026-06-24)
+~~~~~~~~~~~~~~~~~~
+
+Added
+^^^^^
+
+* Added the :meth:`~isaaclab.physics.physics_manager.PhysicsManager.provides_implicit_damping` and
+  :meth:`~isaaclab.renderers.base_renderer.BaseRenderer.provides_temporal_camera_data` capability
+  classmethods on the runtime backend bases, so physics and renderer backends declare whether a
+  camera observation carries the temporal information a policy needs to infer velocity (used to
+  decide frame stacking). Base defaults: physics has implicit damping (``True``); a renderer
+  provides no temporal data (``False``).
+* Added :meth:`~isaaclab.renderers.Renderer.resolve_class` to resolve a renderer's implementation
+  class from its configuration without instantiating it (so tasks can query the above classmethod
+  before a simulation exists).
+
+Fixed
+^^^^^
+
+* Fixed a crash where :class:`~isaaclab.envs.mdp.randomize_visual_color` used in ``reset`` mode
+  raised ``AttributeError: 'NoneType' object has no attribute 'link_count'`` during environment
+  startup on the PhysX backend. The randomizer authored USD (``SetInstanceable`` and material
+  binding) on the articulation root prim, which invalidated the PhysX articulation view so that
+  the subsequent at-play body-name resolution dereferenced a ``None`` metatype. It now scopes to
+  descendant visual prims, mirroring :class:`~isaaclab.envs.mdp.randomize_visual_texture_material`.
+* Fixed the wheel-builder ``newton[sim]`` dependency pin to use Newton commit
+  ``79e95bf5571d70a0a46c8eaedc80644531d27368``, including the
+  RenderContext triangle-mesh construction fix from `newton-physics/newton#3199
+  <https://github.com/newton-physics/newton/pull/3199>`_.
+
+
 7.0.5 (2026-06-23)
 ~~~~~~~~~~~~~~~~~~
 
