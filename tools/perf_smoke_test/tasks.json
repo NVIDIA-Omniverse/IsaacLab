@@ -9,7 +9,8 @@
     "excluded_frames": [[0, 100]],
     "camera_resolution": null,
     "timeout_minutes": 10,
-    "tags": ["always"]
+    "tags": ["always"],
+    "baseline_epoch": 2
   },
   "tasks": [
     {
