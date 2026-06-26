@@ -49,6 +49,7 @@ def _parse_args():
     parser.add_argument("--baselines_dir", type=Path, default=None, help="Flat-file baseline directory; bypasses git")
     parser.add_argument("--allow_baseline_update", default="false")
     parser.add_argument("--summary_file", default=None)
+    parser.add_argument("--verdicts_file", default=None)
     parser.add_argument("--base_sha", default=None, help="PR base SHA for ancestry-aware baseline matching")
     parser.add_argument("--target_branch", default=None, help="Target protected branch, e.g. main/develop/release/x")
     parser.add_argument("--source_branch", default=None, help="Branch that produced baseline updates")
@@ -84,6 +85,14 @@ def _fmt(value, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}" if value is not None else "N/A"
 
 
+def _fmt_pct(value, decimals: int = 2) -> str:
+    return f"{value:.{decimals}f}%" if value is not None else "N/A"
+
+
+def _fmt_signed_pct(value, decimals: int = 2) -> str:
+    return f"{value:+.{decimals}f}%" if value is not None else "N/A"
+
+
 def _short_sha(value: str | None) -> str:
     return value[:12] if value else "none"
 
@@ -109,40 +118,126 @@ def _hard_floor(bench_result: dict, gpu_model: str, backend: str) -> float:
         return 0.0
 
 
-def _build_summary_table(rows: list[tuple]) -> str:
-    lines = [
-        "| Task | Backend | Verdict | FPS | Baseline | Samples | Regression% | Floor | Threshold | Phase | "
-        "Retry | GPU | Runtime | Note |",
-        "|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
-    ]
-    for result, bench_result in rows:
+def _runtime_label(bench_result: dict) -> str:
+    """Return the compact runtime label shown in the sticky summary."""
+    gpu_diag = bench_result.get("gpu_diag") or {}
+    provenance = bench_result.get("provenance") or {}
+    software = provenance.get("software") or {}
+    return ", ".join(
+        part
+        for part in (
+            f"cuda={gpu_diag.get('cuda_version')}" if gpu_diag.get("cuda_version") else "",
+            f"driver={gpu_diag.get('nvidia_driver_version')}" if gpu_diag.get("nvidia_driver_version") else "",
+            f"warp={software.get('warp')}" if software.get("warp") else "",
+        )
+        if part
+    )
+
+
+def _collapse_values(values: list[str]) -> str:
+    """Render a list of possibly repeated values as one summary value."""
+    unique = sorted({value for value in values if value})
+    if not unique:
+        return "N/A"
+    if len(unique) == 1:
+        return unique[0]
+    return "varies: " + "; ".join(unique)
+
+
+def _uniform_value(values: list[str]) -> str | None:
+    """Return the shared value when every row agrees, otherwise ``None``."""
+    unique = {value for value in values if value}
+    return next(iter(unique)) if len(unique) == 1 else None
+
+
+def _threshold_sources(rows: list[tuple]) -> list[str]:
+    return [result.threshold_source for result, _ in rows]
+
+
+def _build_run_context(rows: list[tuple]) -> str:
+    """Return run-wide fields that should not be repeated in every table row."""
+    gpu_names = []
+    runtimes = []
+    for _result, bench_result in rows:
         gpu_diag = bench_result.get("gpu_diag") or {}
         launch_config = bench_result.get("launch_config") or {}
-        gpu_name = gpu_diag.get("gpu_name") or launch_config.get("gpu_model_raw") or launch_config.get("gpu_model", "")
-        provenance = bench_result.get("provenance") or {}
-        software = provenance.get("software") or {}
-        runtime = ", ".join(
-            part
-            for part in (
-                f"cuda={gpu_diag.get('cuda_version')}" if gpu_diag.get("cuda_version") else "",
-                f"driver={gpu_diag.get('nvidia_driver_version')}" if gpu_diag.get("nvidia_driver_version") else "",
-                f"warp={software.get('warp')}" if software.get("warp") else "",
-            )
-            if part
-        )
+        gpu_names.append(gpu_diag.get("gpu_name") or launch_config.get("gpu_model_raw") or launch_config.get("gpu_model", ""))
+        runtimes.append(_runtime_label(bench_result))
+
+    lines = [
+        "### Run context",
+        "",
+        f"- **GPU:** {_collapse_values(gpu_names)}",
+        f"- **Runtime:** {_collapse_values(runtimes)}",
+    ]
+    shared_threshold = _uniform_value(_threshold_sources(rows))
+    if shared_threshold is not None:
+        lines.append(f"- **Threshold:** {shared_threshold} (same for every task in this run)")
+    return "\n".join(lines)
+
+
+def _build_summary_table(rows: list[tuple]) -> str:
+    show_threshold = _uniform_value(_threshold_sources(rows)) is None
+
+    header = ["Task", "Backend", "Verdict", "FPS", "Baseline", "Delta (+ faster / - slower)", "Noise", "Samples"]
+    if show_threshold:
+        header.append("Threshold")
+    header += ["Phase", "Notes", "Retried"]
+
+    aligns = ["---", "---", "---", "---:", "---:", "---:", "---:", "---:"]
+    if show_threshold:
+        aligns.append("---")
+    aligns += ["---", "---", "---"]
+
+    lines = ["| " + " | ".join(header) + " |", "|" + "|".join(aligns) + "|"]
+    for result, bench_result in rows:
         note_parts = [part for part in (result.note, bench_result.get("config_mismatch")) if part]
         if bench_result.get("p99_over_median") is not None:
             note_parts.append(f"p99/med={bench_result['p99_over_median']}")
         if bench_result.get("outlier_count") is not None:
             note_parts.append(f"outliers={bench_result['outlier_count']}")
-        lines.append(
-            f"| {result.task_id} | {result.backend} | {result.verdict.value}"
-            f" | {_fmt(result.measured_fps)} | {_fmt(result.baseline_fps)} | {result.baseline_sample_count}"
-            f" | {_fmt(result.regression_pct, 2)} | {_fmt(result.hard_floor_fps)} | {result.threshold_source}"
-            f" | {result.failure_phase or ''} | {result.was_retried} | {gpu_name}"
-            f" | {runtime} | {'; '.join(note_parts)} |"
-        )
+        cells = [
+            result.task_id,
+            result.backend,
+            result.verdict.value,
+            _fmt(result.measured_fps),
+            _fmt(result.baseline_fps),
+            _fmt_signed_pct(result.regression_pct),
+            _fmt_pct(result.baseline_noise_pct),
+            str(result.baseline_sample_count),
+        ]
+        if show_threshold:
+            cells.append(result.threshold_source)
+        cells += [
+            result.failure_phase or "",
+            "; ".join(note_parts),
+            "yes" if result.was_retried else "no",
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def _build_summary_notes() -> str:
+    return "\n".join(
+        [
+            "### How to read this table",
+            "",
+            "- **PASS**: no meaningful slowdown was detected.",
+            "- **WARN**: suspicious or uncertain result, such as insufficient baselines, retry-only success, or a"
+            " slowdown in the WARN band.",
+            "- **BLOCK**: a blocking-level regression signal was detected. In this POC, BLOCK is advisory (it flags a"
+            " regression) and only fails the check when the gate is explicitly configured as blocking.",
+            "- **HARD_FAILURE**: the benchmark did not produce usable FPS data, for example an import/init/runtime"
+            " failure or config mismatch.",
+            "- **Delta**: change in FPS versus the baseline. ``+`` means faster than baseline (speedup);"
+            " ``-`` means slower than baseline (slowdown).",
+            "- **Noise**: baseline MAD as a percent of baseline FPS. Higher noise means the task/backend naturally"
+            " varies more from run to run.",
+            "- **Phase**: the stage a HARD_FAILURE happened in (e.g. ``import``, ``init``, ``runtime``); blank when"
+            " the benchmark ran to completion.",
+            "- **Retried**: ``yes`` if the cell only passed after an automatic re-run.",
+        ]
+    )
 
 
 def _write_github_output(**values) -> None:
@@ -195,6 +290,7 @@ def main() -> int:
     baselines_updated = False
     baseline_update_failed = False
     pending_git_updates: list[BaselineUpdateRecord] = []
+    verdict_records = []
 
     for artifact_dir, bench_result in items:
         task_id = bench_result["task_id"]
@@ -234,6 +330,19 @@ def main() -> int:
             min_block_regression_pct=min_block_regression_pct,
         )
         rows.append((oracle_result, bench_result))
+        verdict_records.append(
+            {
+                "task_id": task_id,
+                "backend": backend,
+                "verdict": oracle_result.verdict.value,
+                "artifact_dir": str(artifact_dir),
+                "measured_fps": oracle_result.measured_fps,
+                "baseline_fps": oracle_result.baseline_fps,
+                "regression_pct": oracle_result.regression_pct,
+                "physics_backend": bench_result.get("physics_backend"),
+                "render_backend": bench_result.get("render_backend"),
+            }
+        )
 
         print(
             f"[aggregate] {task_id}/{backend}: {oracle_result.verdict.value}"
@@ -314,13 +423,22 @@ def main() -> int:
             print(f"::error::Baseline push failed: {exc}")
 
     table = _build_summary_table(rows)
+    if args.verdicts_file:
+        with open(args.verdicts_file, "w") as fh:
+            json.dump(verdict_records, fh, indent=2)
+            fh.write("\n")
+
     print("\n## Performance Smoke Results\n")
+    print(_build_run_context(rows))
+    print()
+    print(_build_summary_notes())
+    print()
     print(table)
     print()
 
     if args.summary_file:
         with open(args.summary_file, "a") as fh:
-            fh.write("\n## Performance Smoke Results\n\n")
+            fh.write("## Performance Smoke Results\n\n")
             if not use_flat:
                 fh.write(f"Baseline read SHA: `{_short_sha(baseline_read_sha)}`\n\n")
                 if baseline_push_result and baseline_push_result.pushed_sha:
@@ -328,6 +446,10 @@ def main() -> int:
                         f"Baseline pushed SHA: `{_short_sha(baseline_push_result.pushed_sha)}` "
                         f"after {baseline_push_result.attempts} attempt(s)\n\n"
                     )
+            fh.write(_build_run_context(rows))
+            fh.write("\n\n")
+            fh.write(_build_summary_notes())
+            fh.write("\n\n")
             fh.write(table)
             fh.write("\n")
 
