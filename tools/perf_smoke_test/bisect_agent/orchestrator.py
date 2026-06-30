@@ -25,20 +25,38 @@ from typing import TYPE_CHECKING, Any, Callable
 # Import verdict functions — try package-relative first, fall back to absolute.
 # ---------------------------------------------------------------------------
 try:
-    from core.verdict import compute_kpi_stats, check_separation, classify_bisect_verdict
+    from core.verdict import (
+        classify_bisect_verdict,
+        _CV_THRESHOLD, _FAILURE_PHASE_SKIP,
+    )
 except ImportError:
     try:
-        from verdict import compute_kpi_stats, check_separation, classify_bisect_verdict  # type: ignore[no-redef]
+        from verdict import (  # type: ignore[no-redef]
+            classify_bisect_verdict,
+            _CV_THRESHOLD, _FAILURE_PHASE_SKIP,
+        )
     except ImportError:
         # Minimal stubs so the module loads in isolation (e.g. linting).
-        compute_kpi_stats = None  # type: ignore[assignment]
-        check_separation = None  # type: ignore[assignment]
         classify_bisect_verdict = None  # type: ignore[assignment]
+        _CV_THRESHOLD = 0.08  # type: ignore[assignment]
+        _FAILURE_PHASE_SKIP = frozenset({  # type: ignore[assignment]
+            "oom", "hang", "driver", "config_mismatch", "runner_error", "missing_result",
+        })
+
+try:
+    from core.grounding import compute_grounding_result
+except ImportError:
+    try:
+        from grounding import compute_grounding_result  # type: ignore[no-redef]
+    except ImportError:
+        compute_grounding_result = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from infra.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+_SHA_SHORT = 12  # chars used for artifact dir names and log messages
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -159,16 +177,60 @@ _TOOLS: list[dict] = [
         description=(
             "Execute one step of the leftmost-BAD binary search. "
             "Reads commits.json and grounding/result.json. "
-            "Picks the midpoint of [lo, hi], runs it, classifies the result, "
-            "updates state.json, and returns progress or a DONE result."
+            "Picks the midpoint of [lo, hi], runs it n_runs times for statistical "
+            "confidence, classifies the aggregate, updates state.json, and returns "
+            "progress (with raw run_results) or a DONE result. "
+            "n_runs is for statistical re-runs (separate from infra retries). "
+            "Each statistical run gets up to 3 infra retries before counting as lost."
         ),
         properties={
-            "run_dir": {
-                "type": "string",
-                "description": "Path to the run directory (ignored; bound by closure).",
+            "n_runs": {
+                "type": "integer",
+                "description": (
+                    "Number of successful benchmark runs to aggregate before classifying. "
+                    "Use the value from bisect_plan.json (n_runs_per_commit). "
+                    "Defaults to 1. Infra retries (up to 3 per run) are separate from this count."
+                ),
+                "default": 1,
             },
         },
         required=[],
+    ),
+    _make_tool(
+        name="write_plan",
+        description=(
+            "Write the bisect execution plan to bisect_plan.json. "
+            "Call this after assess_grounding and before enumerate_commits. "
+            "The plan documents how bisect steps will be executed based on task variance."
+        ),
+        properties={
+            "n_runs_per_commit": {
+                "type": "integer",
+                "description": (
+                    "Number of statistical runs per bisect step commit. "
+                    "Derive from grounding CV: >=0.15 → 3, 0.08-0.15 → 2, <0.08 → 1."
+                ),
+            },
+            "variance_class": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Task variance class derived from grounding CV.",
+            },
+            "rationale": {
+                "type": "string",
+                "description": "One-sentence explanation (cite CV values and task name).",
+            },
+            "kpis_regressing": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "KPIs identified as regressing in grounding.",
+            },
+            "grounding_cv": {
+                "type": "object",
+                "description": "CV per primary KPI from grounding (fps_mean, fps_p5, fps_median).",
+            },
+        },
+        required=["n_runs_per_commit", "variance_class", "rationale", "kpis_regressing"],
     ),
     _make_tool(
         name="fetch_diff",
@@ -204,6 +266,26 @@ _TOOLS: list[dict] = [
             },
         },
         required=[],
+    ),
+    _make_tool(
+        name="read_artifact",
+        description=(
+            "Read a file from the run directory (relative path). "
+            "Use to inspect failure logs (e.g. 'bisect/<sha12>/benchmark.log') "
+            "or any artifact under the run directory. "
+            "Returns up to 4000 characters. "
+            "Useful for diagnosing gray-area import/init failures before accepting a BAD verdict."
+        ),
+        properties={
+            "relative_path": {
+                "type": "string",
+                "description": (
+                    "Path to the file relative to the run directory "
+                    "(e.g. 'bisect/abc123def456/benchmark.log')."
+                ),
+            },
+        },
+        required=["relative_path"],
     ),
     _make_tool(
         name="write_status",
@@ -351,10 +433,10 @@ def run_orchestrator(
         results: list[dict] = []
         for sha in shas:
             for i in range(n):
-                out_dir = phase_dir / f"{sha[:12]}_{i}"
+                out_dir = phase_dir / f"{sha[:_SHA_SHORT]}_{i}"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(
-                    "_run_experiments: sha=%s run=%d → %s", sha[:12], i, out_dir
+                    "_run_experiments: sha=%s run=%d → %s", sha[:_SHA_SHORT], i, out_dir
                 )
                 try:
                     result = runner_run_commit(
@@ -369,7 +451,7 @@ def run_orchestrator(
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
                         "_run_experiments: runner failed for sha=%s run=%d: %s",
-                        sha[:12], i, exc,
+                        sha[:_SHA_SHORT], i, exc,
                     )
                     result = {
                         "sha": sha,
@@ -434,7 +516,7 @@ def run_orchestrator(
                 "note": "No grounding runs found.",
             }
 
-        if compute_kpi_stats is None or check_separation is None:
+        if compute_grounding_result is None:
             return {
                 "verdict": "ERROR",
                 "separated": False,
@@ -444,55 +526,17 @@ def run_orchestrator(
                 "high_variance_tasks": [],
                 "n_good": len(good_results),
                 "n_bad": len(bad_results),
-                "note": "verdict functions unavailable (ImportError).",
+                "note": "compute_grounding_result unavailable (ImportError).",
             }
 
-        good_stats = compute_kpi_stats(good_results)
-        bad_stats = compute_kpi_stats(bad_results)
-        separation = check_separation(good_stats, bad_stats)
-
-        _CV_THRESHOLD = 0.08
-        _PRIMARY_KPIS = ("fps_mean", "fps_p5", "fps_median")
-
-        high_variance_kpis: list[str] = []
-        for stats_dict, label in [(good_stats, "good"), (bad_stats, "bad")]:
-            for kpi, kpi_data in stats_dict.items():
-                if kpi in _PRIMARY_KPIS:
-                    cv = kpi_data.get("cv", 0.0)
-                    if cv > _CV_THRESHOLD:
-                        tag = f"{kpi}({label})"
-                        if tag not in high_variance_kpis:
-                            high_variance_kpis.append(tag)
-
-        if not separation["separated"]:
-            verdict_str = "WARN_NO_SEPARATION"
-        elif high_variance_kpis:
-            verdict_str = "WARN_HIGH_VARIANCE"
-        else:
-            verdict_str = "PROCEED"
-
-        note = separation.get("note")
-        if high_variance_kpis:
-            hv_note = f"High variance KPIs: {', '.join(high_variance_kpis)}."
-            note = f"{note} {hv_note}".strip() if note else hv_note
-
-        grounding_result: dict = {
-            "good_sha": good_sha,
-            "bad_sha": bad_sha,
-            "task_id": task_id,
-            "backend": backend,
-            "n_good": len(good_results),
-            "n_bad": len(bad_results),
-            "good_stats": good_stats,
-            "bad_stats": bad_stats,
-            "separated": separation["separated"],
-            "kpis_regressing": separation["kpis_regressing"],
-            "kpi_deltas": separation["kpi_deltas"],
-            "separation_ratios": separation["separation_ratios"],
-            "high_variance_tasks": high_variance_kpis,
-            "verdict": verdict_str,
-            "note": note,
-        }
+        grounding_result: dict = compute_grounding_result(
+            good_results=good_results,
+            bad_results=bad_results,
+            good_sha=good_sha,
+            bad_sha=bad_sha,
+            task_id=task_id,
+            backend=backend,
+        )
 
         grounding_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -530,7 +574,7 @@ def run_orchestrator(
 
         return f"{len(commits)} commits in range"
 
-    def _bisect_step() -> dict:
+    def _bisect_step(n_runs: int = 1) -> dict:
         """Execute one step of the leftmost-BAD binary search.
 
         Reads commits.json and grounding/result.json.
@@ -545,7 +589,7 @@ def run_orchestrator(
             try:
                 bisect_result = json.loads(result_path.read_text(encoding="utf-8"))
                 first_bad = bisect_result.get("first_bad_sha", "unknown")
-                logger.info("_bisect_step: bisect_result.json exists → DONE (%s)", first_bad[:12])
+                logger.info("_bisect_step: bisect_result.json exists → DONE (%s)", first_bad[:_SHA_SHORT])
                 return {
                     "status": "DONE",
                     "first_bad_sha": bisect_result.get("first_bad_sha"),
@@ -658,13 +702,27 @@ def run_orchestrator(
             }
 
         # ------------------------------------------------------------------
-        # Helper: run one commit and classify it.
+        # Helper: run once with infra retry (up to 3 attempts).
+        #
+        # This is the INFRA retry budget — it handles transient environment
+        # failures (oom/hang/driver/runner_error).  It is separate from the
+        # STATISTICAL re-run budget controlled by n_runs in _run_n_and_classify.
+        #
+        # Returns (sha, verdict, failure_phase, run_result).
         # ------------------------------------------------------------------
-        def _run_and_classify(idx: int) -> tuple[str, str]:
+
+        def _run_one_with_infra_retry(
+            idx: int, run_num: int = 0, *, attempt: int = 1
+        ) -> tuple[str, str, str | None, dict]:
             sha = commits[idx]["sha"]
-            out_dir = bisect_dir / sha[:12]
+            stat_suffix = f"_s{run_num}" if run_num > 0 else ""
+            infra_suffix = "" if attempt == 1 else f"_retry{attempt}"
+            out_dir = bisect_dir / f"{sha[:_SHA_SHORT]}{stat_suffix}{infra_suffix}"
             out_dir.mkdir(parents=True, exist_ok=True)
-            logger.info("_bisect_step._run_and_classify: idx=%d sha=%s", idx, sha[:12])
+            logger.info(
+                "_bisect_step._run_one: idx=%d sha=%s run_num=%d attempt=%d",
+                idx, sha[:_SHA_SHORT], run_num, attempt,
+            )
             try:
                 run_result = runner_run_commit(
                     sha,
@@ -675,23 +733,137 @@ def run_orchestrator(
                     dev_perf_map=dev_perf_map,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.error("_bisect_step: runner failed for sha=%s: %s", sha[:12], exc)
-                return sha, "SKIP"
+                logger.error("_bisect_step: runner failed sha=%s: %s", sha[:_SHA_SHORT], exc)
+                err_result: dict = {
+                    "sha": sha, "failure_phase": "runner_error",
+                    "raw_fps_mean": None, "exit_code": -1,
+                }
+                return sha, "SKIP", "runner_error", err_result
 
             if classify_bisect_verdict is None:
-                return sha, "SKIP"
+                return sha, "SKIP", None, run_result
 
             verdict = classify_bisect_verdict(run_result, good_stats, kpis_regressing)
-            logger.info("_bisect_step: sha=%s verdict=%s", sha[:12], verdict)
-            return sha, verdict
+            failure_phase: str | None = run_result.get("failure_phase")
+            logger.info(
+                "_bisect_step: sha=%s run=%d attempt=%d verdict=%s fp=%s",
+                sha[:_SHA_SHORT], run_num, attempt, verdict, failure_phase,
+            )
+
+            if attempt < 3:
+                # import/init: retry once — could be env setup fluke
+                if failure_phase in {"import", "init"} and attempt == 1:
+                    logger.info(
+                        "_bisect_step: %s → %s run=%d attempt=1; retrying once.",
+                        sha[:_SHA_SHORT], failure_phase, run_num,
+                    )
+                    return _run_one_with_infra_retry(idx, run_num, attempt=2)
+
+                # Infra SKIP: retry up to 3 total
+                if verdict == "SKIP" and failure_phase in _FAILURE_PHASE_SKIP:
+                    logger.info(
+                        "_bisect_step: %s → SKIP (infra: %s, run=%d, attempt=%d); retrying.",
+                        sha[:_SHA_SHORT], failure_phase, run_num, attempt,
+                    )
+                    return _run_one_with_infra_retry(idx, run_num, attempt=attempt + 1)
+
+            return sha, verdict, failure_phase, run_result
+
+        # ------------------------------------------------------------------
+        # Helper: run N times for statistics, aggregate, classify.
+        #
+        # This is the STATISTICAL re-run budget — separate from infra retries.
+        #   - BAD-phase failure (runtime/import/init confirmed): return BAD
+        #     immediately, no further statistical runs needed.
+        #   - Infra SKIP after 3 retries: that statistical slot is lost; try
+        #     another slot if the budget allows.
+        #   - n_runs successful results collected → aggregate and classify.
+        # ------------------------------------------------------------------
+        def _run_n_and_classify(
+            idx: int, n_runs: int
+        ) -> tuple[str, str, str | None, list[dict]]:
+            sha = commits[idx]["sha"]
+            successful_results: list[dict] = []
+            all_results: list[dict] = []
+            # Allow extra attempts to absorb occasional infra losses
+            max_stat_attempts = n_runs + 2
+
+            for run_num in range(max_stat_attempts):
+                if len(successful_results) >= n_runs:
+                    break
+
+                _, single_verdict, fp, run_result = _run_one_with_infra_retry(idx, run_num)
+                all_results.append({
+                    "run_num": run_num,
+                    "verdict": single_verdict,
+                    "failure_phase": fp,
+                    "fps_mean": run_result.get("raw_fps_mean"),
+                    "fps_p5": run_result.get("raw_fps_p5"),
+                    "fps_median": run_result.get("raw_fps_median"),
+                    "gpu_mem_mb": run_result.get("gpu_mem_used_mb"),
+                    "exit_code": run_result.get("exit_code"),
+                })
+
+                if single_verdict == "BAD" and fp in {"import", "init", "runtime"}:
+                    # Commit-caused crash — stop immediately, no more runs needed
+                    logger.info(
+                        "_bisect_step: %s → BAD (fp=%s run=%d); stopping statistical runs.",
+                        sha[:_SHA_SHORT], fp, run_num,
+                    )
+                    return sha, "BAD", fp, all_results
+
+                if single_verdict == "SKIP":
+                    # Infra SKIP — slot lost, but try next run if budget remains
+                    logger.info(
+                        "_bisect_step: %s run=%d → SKIP (infra); slot lost.",
+                        sha[:_SHA_SHORT], run_num,
+                    )
+                    continue
+
+                # Successful run with KPI data
+                successful_results.append(run_result)
+
+            if not successful_results:
+                logger.warning(
+                    "_bisect_step: %s — all %d statistical runs SKIPped; returning SKIP.",
+                    sha[:_SHA_SHORT], max_stat_attempts,
+                )
+                return sha, "SKIP", "missing_result", all_results
+
+            # Aggregate N successful results — build a synthetic run_result from
+            # per-KPI medians so classify_bisect_verdict can compare to good_stats.
+            if compute_kpi_stats is not None and len(successful_results) > 1:
+                agg_stats = compute_kpi_stats(successful_results)
+                agg_result: dict = {
+                    "sha": sha,
+                    "failure_phase": None,
+                    "raw_fps_mean": agg_stats.get("fps_mean", {}).get("median"),
+                    "raw_fps_p5": agg_stats.get("fps_p5", {}).get("median"),
+                    "raw_fps_median": agg_stats.get("fps_median", {}).get("median"),
+                    "gpu_mem_used_mb": agg_stats.get("gpu_mem_used_mb", {}).get("median"),
+                }
+            else:
+                # n_runs=1 or no stats module: use the single result directly
+                agg_result = successful_results[0]
+
+            agg_verdict = (
+                classify_bisect_verdict(agg_result, good_stats, kpis_regressing)
+                if classify_bisect_verdict is not None
+                else "SKIP"
+            )
+            logger.info(
+                "_bisect_step: %s → %s (aggregated %d/%d runs)",
+                sha[:_SHA_SHORT], agg_verdict, len(successful_results), n_runs,
+            )
+            return sha, agg_verdict, None, all_results
 
         # ------------------------------------------------------------------
         # Execute ONE binary search step.
         # ------------------------------------------------------------------
         mid = (lo + hi) // 2
 
-        # Nonlocal mutation — use a mutable container to allow inner-closure writes.
-        _state: dict[str, Any] = {"lo": lo, "hi": hi, "skip_count": skip_count}
+        _last_failure_phase: str | None = None
+        _step_run_results: list[dict] = []
 
         if mid in tested_by_index:
             verdict = tested_by_index[mid]
@@ -700,48 +872,43 @@ def run_orchestrator(
                 "_bisect_step: mid=%d already tested → %s (from state)", mid, verdict
             )
         else:
-            tested_sha, verdict = _run_and_classify(mid)
+            tested_sha, verdict, _last_failure_phase, _step_run_results = (
+                _run_n_and_classify(mid, n_runs)
+            )
             tested.append({"sha": tested_sha, "index": mid, "verdict": verdict})
             tested_by_index[mid] = verdict
             if verdict == "SKIP":
-                _state["skip_count"] += 1
+                skip_count += 1
 
         # Apply leftmost-BAD bisect transition.
         if verdict == "GOOD":
-            _state["lo"] = mid + 1
+            lo = mid + 1
         elif verdict == "BAD":
-            _state["hi"] = mid
+            hi = mid
         else:
             # SKIP: try mid+1 then mid-1.
             resolved = False
             for fallback_idx in (mid + 1, mid - 1):
-                lo_cur = _state["lo"]
-                hi_cur = _state["hi"]
-                if lo_cur <= fallback_idx <= hi_cur and fallback_idx not in tested_by_index:
-                    fb_sha, fb_verdict = _run_and_classify(fallback_idx)
+                if lo <= fallback_idx <= hi and fallback_idx not in tested_by_index:
+                    fb_sha, fb_verdict, fb_fp, _ = _run_n_and_classify(fallback_idx, n_runs)
                     tested.append(
                         {"sha": fb_sha, "index": fallback_idx, "verdict": fb_verdict}
                     )
                     tested_by_index[fallback_idx] = fb_verdict
                     if fb_verdict == "SKIP":
-                        _state["skip_count"] += 1
+                        skip_count += 1
 
                     if fb_verdict == "GOOD":
-                        _state["lo"] = fallback_idx + 1
+                        lo = fallback_idx + 1
                         resolved = True
                         break
                     elif fb_verdict == "BAD":
-                        _state["hi"] = fallback_idx
+                        hi = fallback_idx
                         resolved = True
                         break
 
             if not resolved:
-                _state["lo"] = mid + 1
-
-        # Write back mutated state.
-        lo = _state["lo"]
-        hi = _state["hi"]
-        skip_count = _state["skip_count"]
+                lo = mid + 1
 
         _save_state()
 
@@ -771,7 +938,7 @@ def run_orchestrator(
                 )
                 logger.info(
                     "_bisect_step: convergence → first_bad=%s (confidence=%s)",
-                    first_bad_sha[:12],
+                    first_bad_sha[:_SHA_SHORT],
                     confidence,
                 )
             except OSError as exc:
@@ -791,7 +958,13 @@ def run_orchestrator(
             "hi": hi,
             "tested_sha": tested_sha,
             "verdict": verdict,
+            "failure_phase": _last_failure_phase,
             "commits_remaining": hi - lo,
+            # Per-run structured results for LLM inspection.
+            # Each entry: {run_num, verdict, failure_phase, fps_mean, fps_p5,
+            #              fps_median, gpu_mem_mb, exit_code}
+            "run_results": _step_run_results,
+            "n_runs_requested": n_runs,
         }
 
     def _fetch_diff(sha_a: str, sha_b: str) -> str:
@@ -812,6 +985,33 @@ def run_orchestrator(
 
         return json.dumps(result, indent=2)
 
+    def _write_plan(
+        n_runs_per_commit: int,
+        variance_class: str,
+        rationale: str,
+        kpis_regressing: list[str],
+        grounding_cv: dict | None = None,
+    ) -> dict:
+        """Persist the bisect execution plan to bisect_plan.json."""
+        plan: dict = {
+            "n_runs_per_commit": n_runs_per_commit,
+            "variance_class": variance_class,
+            "rationale": rationale,
+            "kpis_regressing": kpis_regressing,
+            "grounding_cv": grounding_cv or {},
+            "created_at": _now_iso(),
+        }
+        plan_path = run_dir / "bisect_plan.json"
+        try:
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            logger.info(
+                "_write_plan: n_runs=%d variance=%s → %s",
+                n_runs_per_commit, variance_class, plan_path,
+            )
+        except OSError as exc:
+            logger.warning("_write_plan: could not write bisect_plan.json: %s", exc)
+        return plan
+
     def _run_diagnosis() -> dict:
         """Load bisect and grounding results, then call diagnosis_run."""
         result_path = run_dir / "bisect_result.json"
@@ -830,7 +1030,7 @@ def run_orchestrator(
 
         logger.info(
             "_run_diagnosis: first_bad=%s",
-            bisect_result.get("first_bad_sha", "unknown")[:12],
+            bisect_result.get("first_bad_sha", "unknown")[:_SHA_SHORT],
         )
         try:
             diagnosis = diagnosis_run(
@@ -843,6 +1043,7 @@ def run_orchestrator(
                 repo_path=repo_path,
                 dev_mode=dev_mode,
                 dev_perf_map=dev_perf_map,
+                max_turns=12,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("_run_diagnosis: diagnosis_run raised: %s\n%s", exc, traceback.format_exc())
@@ -871,9 +1072,26 @@ def run_orchestrator(
         summary = _enumerate_commits(good_sha, bad_sha)
         return summary
 
-    def _tool_bisect_step(**_kwargs: Any) -> str:
-        result = _bisect_step()
+    def _tool_bisect_step(n_runs: int = 1, **_kwargs: Any) -> str:
+        result = _bisect_step(n_runs=max(1, n_runs))
         return json.dumps(result, default=str)
+
+    def _tool_write_plan(
+        n_runs_per_commit: int,
+        variance_class: str,
+        rationale: str,
+        kpis_regressing: list[str],
+        grounding_cv: dict | None = None,
+        **_kwargs: Any,
+    ) -> str:
+        result = _write_plan(
+            n_runs_per_commit=n_runs_per_commit,
+            variance_class=variance_class,
+            rationale=rationale,
+            kpis_regressing=kpis_regressing,
+            grounding_cv=grounding_cv,
+        )
+        return json.dumps(result, indent=2)
 
     def _tool_fetch_diff(sha_a: str, sha_b: str) -> str:
         return _fetch_diff(sha_a, sha_b)
@@ -881,6 +1099,36 @@ def run_orchestrator(
     def _tool_run_diagnosis(**_kwargs: Any) -> str:
         result = _run_diagnosis()
         return json.dumps(result, default=str)
+
+    def _tool_read_artifact(relative_path: str) -> str:
+        """Read a file under run_dir; max 4000 characters."""
+        try:
+            target = (run_dir / relative_path).resolve()
+            run_dir_resolved = run_dir.resolve()
+            target.relative_to(run_dir_resolved)  # raises ValueError if outside
+        except ValueError:
+            return json.dumps({
+                "error": f"Access denied: '{relative_path}' resolves outside run_dir."
+            })
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": f"Path resolution error: {exc}"})
+
+        if not target.exists():
+            return json.dumps({"error": f"File not found: {relative_path}"})
+        if not target.is_file():
+            return json.dumps({"error": f"Not a regular file: {relative_path}"})
+
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return json.dumps({"error": f"Could not read file: {exc}"})
+
+        truncated = len(content) > 4000
+        result: dict[str, Any] = {"content": content[:4000]}
+        if truncated:
+            result["truncated"] = True
+            result["total_chars"] = len(content)
+        return json.dumps(result, indent=2)
 
     def _tool_write_status(
         phase: str,
@@ -903,7 +1151,9 @@ def run_orchestrator(
         "assess_grounding": _tool_assess_grounding,
         "enumerate_commits": _tool_enumerate_commits,
         "bisect_step": _tool_bisect_step,
+        "write_plan": _tool_write_plan,
         "fetch_diff": _tool_fetch_diff,
+        "read_artifact": _tool_read_artifact,
         "run_diagnosis": _tool_run_diagnosis,
         "write_status": _tool_write_status,
     }

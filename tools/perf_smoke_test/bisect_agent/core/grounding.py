@@ -24,14 +24,75 @@ from typing import Callable
 # Import verdict functions — try relative first, fall back to absolute.
 # ---------------------------------------------------------------------------
 try:
-    from .verdict import compute_kpi_stats, check_separation
+    from .verdict import compute_kpi_stats, check_separation, _PRIMARY_KPIS, _CV_THRESHOLD
 except ImportError:
-    from core.verdict import compute_kpi_stats, check_separation  # type: ignore[no-redef]
+    from core.verdict import compute_kpi_stats, check_separation, _PRIMARY_KPIS, _CV_THRESHOLD  # type: ignore[no-redef]
+
+_SHA_SHORT = 12  # chars used for artifact dir names and log messages
 
 logger = logging.getLogger(__name__)
 
-# Primary KPIs used to decide whether to add more runs.
-_PRIMARY_KPIS = ("fps_mean", "fps_p5", "fps_median")
+
+def compute_grounding_result(
+    good_results: list[dict],
+    bad_results: list[dict],
+    good_sha: str,
+    bad_sha: str,
+    task_id: str,
+    backend: str,
+    *,
+    cv_threshold: float = _CV_THRESHOLD,
+) -> dict:
+    """Compute the grounding result dict from run results (no I/O).
+
+    Filters high-variance KPIs by _PRIMARY_KPIS so only benchmark-relevant
+    KPIs influence the verdict.  Used by both run_grounding (which writes the
+    result to disk) and orchestrator._assess_grounding (which reconstructs the
+    result from pre-existing run files).
+    """
+    good_stats = compute_kpi_stats(good_results)
+    bad_stats = compute_kpi_stats(bad_results)
+    separation = check_separation(good_stats, bad_stats)
+
+    high_variance_kpis: list[str] = []
+    for stats_dict, label in [(good_stats, "good"), (bad_stats, "bad")]:
+        for kpi, kpi_data in stats_dict.items():
+            if kpi in _PRIMARY_KPIS:
+                cv = kpi_data.get("cv", 0.0)
+                if cv > cv_threshold:
+                    tag = f"{kpi}({label})"
+                    if tag not in high_variance_kpis:
+                        high_variance_kpis.append(tag)
+
+    if not separation["separated"]:
+        verdict_str = "WARN_NO_SEPARATION"
+    elif high_variance_kpis:
+        verdict_str = "WARN_HIGH_VARIANCE"
+    else:
+        verdict_str = "PROCEED"
+
+    note = separation.get("note")
+    if high_variance_kpis:
+        hv_note = f"High variance KPIs after max runs: {', '.join(high_variance_kpis)}."
+        note = f"{note} {hv_note}".strip() if note else hv_note
+
+    return {
+        "good_sha": good_sha,
+        "bad_sha": bad_sha,
+        "task_id": task_id,
+        "backend": backend,
+        "n_good": len(good_results),
+        "n_bad": len(bad_results),
+        "good_stats": good_stats,
+        "bad_stats": bad_stats,
+        "separated": separation["separated"],
+        "kpis_regressing": separation["kpis_regressing"],
+        "kpi_deltas": separation["kpi_deltas"],
+        "separation_ratios": separation["separation_ratios"],
+        "high_variance_tasks": high_variance_kpis,
+        "verdict": verdict_str,
+        "note": note,
+    }
 
 
 def run_grounding(
@@ -43,8 +104,8 @@ def run_grounding(
     runner_run_commit: Callable,
     *,
     n_start: int = 3,
-    n_max: int = 12,
-    cv_threshold: float = 0.08,
+    n_max: int = 5,
+    cv_threshold: float = _CV_THRESHOLD,
     dev_mode: bool = False,
     dev_perf_map: dict | None = None,
 ) -> dict:
@@ -100,27 +161,39 @@ def run_grounding(
 
     # ------------------------------------------------------------------
     # Helper: run a single experiment and return its run_result dict.
+    # Runner exceptions are caught so one bad run doesn't abort grounding.
     # ------------------------------------------------------------------
     def _run_one(sha: str, run_index: int) -> dict:
-        artifact_subdir = grounding_dir / f"{sha[:12]}_{run_index}"
+        artifact_subdir = grounding_dir / f"{sha[:_SHA_SHORT]}_{run_index}"
         artifact_subdir.mkdir(parents=True, exist_ok=True)
         logger.info(
-            "Grounding: running %s run_index=%d → %s", sha[:12], run_index, artifact_subdir
+            "Grounding: running %s run_index=%d → %s", sha[:_SHA_SHORT], run_index, artifact_subdir
         )
-        result = runner_run_commit(
-            sha,
-            task_id,
-            backend,
-            artifact_subdir,
-            dev_mode=dev_mode,
-            dev_perf_map=dev_perf_map,
-        )
+        try:
+            result = runner_run_commit(
+                sha,
+                task_id,
+                backend,
+                artifact_subdir,
+                dev_mode=dev_mode,
+                dev_perf_map=dev_perf_map,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Grounding: runner raised for %s run_index=%d: %s",
+                sha[:_SHA_SHORT], run_index, exc,
+            )
+            result = {
+                "sha": sha, "task_id": task_id, "backend": backend,
+                "run_index": run_index, "exit_code": -1,
+                "failure_phase": "runner_error", "raw_fps_mean": None,
+                "raw_fps_median": None, "raw_fps_p5": None, "raw_fps_p95": None,
+                "gpu_mem_used_mb": None, "wall_time_s": None,
+            }
         # Ensure run_index is set correctly (runner may set it to 0 always).
         result["run_index"] = run_index
         # Store relative artifact_dir so the result is portable.
-        result["artifact_dir"] = str(
-            artifact_subdir.relative_to(run_dir)
-        )
+        result["artifact_dir"] = str(artifact_subdir.relative_to(run_dir))
         return result
 
     # ------------------------------------------------------------------
@@ -175,78 +248,38 @@ def run_grounding(
             new_count = min(batch_size, n_max - len(good_results))
             if new_count <= 0:
                 break
-            for i in range(new_count):
+            for _ in range(new_count):
                 good_results.append(_run_one(good_sha, len(good_results)))
 
         if bad_needs:
             new_count = min(batch_size, n_max - len(bad_results))
             if new_count <= 0:
                 break
-            for i in range(new_count):
+            for _ in range(new_count):
                 bad_results.append(_run_one(bad_sha, len(bad_results)))
 
     # ------------------------------------------------------------------
-    # Phase 3: final statistics and separation check.
+    # Phase 3-5: compute final grounding result and write to disk.
     # ------------------------------------------------------------------
-    good_stats = compute_kpi_stats(good_results)
-    bad_stats = compute_kpi_stats(bad_results)
-    separation = check_separation(good_stats, bad_stats)
-
-    # ------------------------------------------------------------------
-    # Phase 4: determine overall grounding verdict.
-    # ------------------------------------------------------------------
-    # Identify any KPIs that still exceed cv_threshold after n_max runs.
-    high_variance_kpis: list[str] = []
-    for stats_dict, label in [(good_stats, "good"), (bad_stats, "bad")]:
-        for kpi, kpi_data in stats_dict.items():
-            cv = kpi_data.get("cv", 0.0)
-            if cv > cv_threshold:
-                tag = f"{kpi}({label})"
-                if tag not in high_variance_kpis:
-                    high_variance_kpis.append(tag)
-
-    if not separation["separated"]:
-        verdict_str = "WARN_NO_SEPARATION"
-    elif high_variance_kpis:
-        verdict_str = "WARN_HIGH_VARIANCE"
-    else:
-        verdict_str = "PROCEED"
-
-    note = separation.get("note")
-    if high_variance_kpis:
-        hv_note = f"High variance KPIs after n_max runs: {', '.join(high_variance_kpis)}."
-        note = f"{note} {hv_note}".strip() if note else hv_note
-
-    # ------------------------------------------------------------------
-    # Phase 5: assemble result dict and write to disk.
-    # ------------------------------------------------------------------
-    grounding_result: dict = {
-        "good_sha": good_sha,
-        "bad_sha": bad_sha,
-        "task_id": task_id,
-        "backend": backend,
-        "n_good": len(good_results),
-        "n_bad": len(bad_results),
-        "good_stats": good_stats,
-        "bad_stats": bad_stats,
-        "separated": separation["separated"],
-        "kpis_regressing": separation["kpis_regressing"],
-        "kpi_deltas": separation["kpi_deltas"],
-        "separation_ratios": separation["separation_ratios"],
-        "high_variance_tasks": high_variance_kpis,
-        "verdict": verdict_str,
-        "note": note,
-    }
+    grounding_result = compute_grounding_result(
+        good_results=good_results,
+        bad_results=bad_results,
+        good_sha=good_sha,
+        bad_sha=bad_sha,
+        task_id=task_id,
+        backend=backend,
+        cv_threshold=cv_threshold,
+    )
 
     with result_path.open("w") as fh:
         json.dump(grounding_result, fh, indent=2)
 
     logger.info(
         "Grounding complete: verdict=%s separated=%s kpis_regressing=%s n_good=%d n_bad=%d",
-        verdict_str,
-        separation["separated"],
-        separation["kpis_regressing"],
-        len(good_results),
-        len(bad_results),
+        grounding_result["verdict"],
+        grounding_result["separated"],
+        grounding_result["kpis_regressing"],
+        grounding_result["n_good"],
+        grounding_result["n_bad"],
     )
     return grounding_result
