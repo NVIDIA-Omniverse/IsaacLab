@@ -1,0 +1,263 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# One-off collection of legacy (IsaacLab 2.0) hard-floor FPS values.
+#
+# Purpose: the perf gate's per-task ``fps_mean_floor`` should never sit below the
+# FPS a previous shipped IsaacLab version achieved. This workflow runs the
+# standalone probe (tools/perf_regression_gate/measure_legacy_fps.py) inside a
+# legacy IsaacLab 2.0 / Isaac Sim 4.5 image on the SAME RTX PRO 6000 fleet the
+# gate runs on, so the measured FPS is directly comparable, then prints a
+# ready-to-paste ``fps_mean_floor`` block for tasks.json.
+#
+# This is deliberately manual (workflow_dispatch only) and NEVER writes anything:
+# it just measures and reports. Copy the printed numbers into tasks.json by hand.
+#
+# IMPORTANT:
+#   * IsaacLab 2.0 is PhysX-only — there is no Newton backend to measure. Only
+#     physx floors come out of this run.
+#   * The probe is mounted into the legacy image; the legacy image's own 2.0
+#     source/isaaclab install is used (we do NOT overlay current repo source,
+#     which would defeat the point).
+#   * ``image_ref`` MUST be an image the fleet can pull that contains IsaacLab 2.0
+#     + Isaac Sim 4.5. Provide it explicitly; there is no safe default.
+
+name: Performance Gate - Collect Legacy (2.0) Floors
+
+on:
+  # The shared GPU fleet does not grant runners to pull_request events, and a
+  # workflow_dispatch workflow is only dispatchable from the default branch. So
+  # (mirroring the gate) trigger on push to a dedicated collection branch: pushing
+  # the branch is what actually launches this one-off run on the RTX fleet.
+  push:
+    branches: [neilm/collect-v2-floors]
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Pullable IsaacLab 2.0 / Isaac Sim 4.5 image. Default is the public minimal 2.0 container on NGC."
+        required: false
+        default: "nvcr.io/nvidia/isaac-lab:2.0.0"
+      cells:
+        description: >-
+          JSON array of cells to measure. Each: {"task","num_envs","num_frames","excluded","cameras"?}.
+          'task' is the 2.0 gym id (may differ from current, e.g. has a -v0 suffix).
+        required: false
+        default: >-
+          [
+            {"task":"Isaac-Cartpole-Direct-v0","num_envs":4096,"num_frames":300,"excluded":"0-100"},
+            {"task":"Isaac-Factory-GearMesh-Direct-v0","num_envs":512,"num_frames":300,"excluded":"0-100"},
+            {"task":"Isaac-Velocity-Flat-G1-v0","num_envs":512,"num_frames":300,"excluded":"0-100"}
+          ]
+      samples:
+        description: "Repetitions per cell (the reported floor is the median of these)."
+        required: false
+        default: "5"
+      seed:
+        description: "Environment seed for every run."
+        required: false
+        default: "42"
+      gpu_key:
+        description: "tasks.json GPU bucket key the printed block is keyed under."
+        required: false
+        default: "rtx_pro_6000_blackwell"
+
+concurrency:
+  group: perf-gate-collect-v2-floors
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+  LEGACY_IMAGE_TAG: isaac-lab-legacy:floor-${{ github.run_id }}
+
+jobs:
+  collect:
+    name: Collect legacy floors
+    runs-on: ${{ fromJSON(vars.PERF_GATE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    timeout-minutes: 600
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
+    - name: Pull legacy IsaacLab 2.0 image
+      env:
+        # Fall back to the default when push-triggered (inputs.* is empty on push).
+        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.0.0' }}
+      run: |
+        set -euo pipefail
+        if [ -z "${CI_IMAGE_REF}" ]; then
+          echo "::error::image_ref is empty (expected a pullable IsaacLab 2.0 / Isaac Sim 4.5 image)."
+          exit 1
+        fi
+        # The runner's docker credential store backend is broken ("not implemented"),
+        # so disable credsStore before any login (same trick as the gate workflows).
+        DOCKER_CONFIG_DIR="$(mktemp -d)"
+        echo '{"credsStore":""}' > "${DOCKER_CONFIG_DIR}/config.json"
+        export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
+        REGISTRY="${CI_IMAGE_REF%%/*}"
+        if [ "${REGISTRY}" = "nvcr.io" ] && [ -n "${NGC_API_KEY:-}" ]; then
+          echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+        fi
+        echo "🔵 Pulling legacy image ${CI_IMAGE_REF}..."
+        docker pull "${CI_IMAGE_REF}" || {
+          echo "::error::Failed to pull ${CI_IMAGE_REF}. Confirm the fleet's NGC key is entitled to it."
+          exit 1
+        }
+        docker tag "${CI_IMAGE_REF}" "${{ env.LEGACY_IMAGE_TAG }}"
+        rm -rf "${DOCKER_CONFIG_DIR}"
+
+    - name: Run legacy FPS probe per cell
+      env:
+        # inputs.* are empty on push-triggered runs; fall back to the dispatch defaults.
+        CELLS: ${{ inputs.cells }}
+        SAMPLES: ${{ inputs.samples || '5' }}
+        SEED: ${{ inputs.seed || '42' }}
+      run: |
+        set -euo pipefail
+        # Default cell set when push-triggered (no inputs): the physx cells of the
+        # current matrix that exist in IsaacLab 2.0, using their 2.0 gym ids.
+        if [ -z "${CELLS}" ]; then
+          CELLS='[
+            {"task":"Isaac-Cartpole-Direct-v0","num_envs":4096,"num_frames":300,"excluded":"0-100"},
+            {"task":"Isaac-Factory-GearMesh-Direct-v0","num_envs":512,"num_frames":300,"excluded":"0-100"},
+            {"task":"Isaac-Velocity-Flat-G1-v0","num_envs":512,"num_frames":300,"excluded":"0-100"}
+          ]'
+        fi
+        OUT_ROOT="${{ github.workspace }}/legacy-floors"
+        SCRIPT="${{ github.workspace }}/tools/perf_regression_gate/measure_legacy_fps.py"
+        mkdir -p "${OUT_ROOT}" "${{ github.workspace }}/kit-cache" "${{ github.workspace }}/jit-cache/warp" "${{ github.workspace }}/jit-cache/nv"
+        chmod -R 0777 "${OUT_ROOT}" "${{ github.workspace }}/kit-cache" "${{ github.workspace }}/jit-cache"
+
+        # Iterate the requested cells (jq is preinstalled on the fleet runners).
+        echo "${CELLS}" | jq -c '.[]' | while read -r cell; do
+          TASK="$(echo "${cell}" | jq -r '.task')"
+          NUM_ENVS="$(echo "${cell}" | jq -r '.num_envs')"
+          NUM_FRAMES="$(echo "${cell}" | jq -r '.num_frames // 300')"
+          EXCLUDED="$(echo "${cell}" | jq -r '.excluded // "0-100"')"
+          CAMERAS="$(echo "${cell}" | jq -r '.cameras // false')"
+          SAFE_TASK="$(echo "${TASK}" | tr -c 'a-zA-Z0-9' '-')"
+
+          CAM_FLAG=""
+          if [ "${CAMERAS}" = "true" ]; then
+            CAM_FLAG="--enable_cameras"
+          fi
+
+          for s in $(seq 1 "${SAMPLES}"); do
+            SAMPLE_DIR="${OUT_ROOT}/${SAFE_TASK}/sample_${s}"
+            mkdir -p "${SAMPLE_DIR}"; chmod -R 0777 "${SAMPLE_DIR}"
+            CONTAINER="legacy-floor-${SAFE_TASK}-${s}-${{ github.run_id }}"
+            echo "::group::${TASK} sample ${s}/${SAMPLES}"
+            docker rm -f "${CONTAINER}" 2>/dev/null || true
+            # Mount ONLY the standalone probe into the legacy image; use the image's
+            # own 2.0 isaaclab install (do NOT overlay current repo source).
+            docker run --rm --name "${CONTAINER}" \
+              --init --stop-timeout 10 --entrypoint bash \
+              --gpus all --network=host \
+              --security-opt=no-new-privileges:true \
+              --ulimit nofile=65536:65536 --ulimit nproc=4096:4096 \
+              -e OMNI_KIT_ACCEPT_EULA=yes -e ACCEPT_EULA=Y \
+              -e OMNI_KIT_DISABLE_CUP=1 -e ISAAC_SIM_HEADLESS=1 \
+              -e PYTHONUNBUFFERED=1 -e PYTHONDONTWRITEBYTECODE=1 \
+              -e WARP_CACHE_PATH=/tmp/jit-cache/warp -e CUDA_CACHE_PATH=/tmp/jit-cache/nv \
+              -v "${SCRIPT}:/tmp/measure_legacy_fps.py:ro" \
+              -v "${SAMPLE_DIR}:/tmp/floor_out" \
+              -v "${{ github.workspace }}/jit-cache:/tmp/jit-cache" \
+              -v "${{ github.workspace }}/kit-cache:/isaac-sim/kit/cache" \
+              "${{ env.LEGACY_IMAGE_TAG }}" \
+              -c "
+                set -e
+                # The fork's images install IsaacLab at /workspace/isaaclab, but the
+                # public minimal 2.0 container ships source at /workspace/IsaacLab.
+                # Auto-detect rather than hard-code so either image works.
+                ISAACLAB_ROOT=''
+                for d in /workspace/isaaclab /workspace/IsaacLab /root/IsaacLab /isaac-lab; do
+                  if [ -x \"\$d/isaaclab.sh\" ]; then ISAACLAB_ROOT=\"\$d\"; break; fi
+                done
+                if [ -z \"\$ISAACLAB_ROOT\" ]; then
+                  echo 'could not locate isaaclab.sh in the legacy image'; exit 1
+                fi
+                cd \"\$ISAACLAB_ROOT\"
+                rm -f _isaac_sim
+                ln -s /isaac-sim _isaac_sim
+                ./isaaclab.sh -p /tmp/measure_legacy_fps.py \
+                  --task '${TASK}' \
+                  --num_envs ${NUM_ENVS} \
+                  --num_frames ${NUM_FRAMES} \
+                  --excluded_frames ${EXCLUDED} \
+                  --seed ${SEED} \
+                  --headless ${CAM_FLAG} \
+                  --output_path /tmp/floor_out
+              " 2>&1 | tee "${SAMPLE_DIR}/run.log" || echo "::warning::${TASK} sample ${s} failed (see log)"
+            echo "::endgroup::"
+          done
+        done
+
+    - name: Aggregate floors (median of samples) and print tasks.json block
+      if: always()
+      env:
+        GPU_KEY: ${{ inputs.gpu_key || 'rtx_pro_6000_blackwell' }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json, os, statistics
+        from pathlib import Path
+
+        out_root = Path(os.environ["GITHUB_WORKSPACE"]) / "legacy-floors"
+        gpu_key = os.environ.get("GPU_KEY", "rtx_pro_6000_blackwell")
+        summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+        rows = []
+        per_task_floor = {}
+        for task_dir in sorted(p for p in out_root.glob("*") if p.is_dir()):
+            samples = []
+            for jf in sorted(task_dir.glob("sample_*/legacy_fps_*.json")):
+                try:
+                    fps = json.loads(jf.read_text()).get("mean_kept_effective_fps")
+                    if isinstance(fps, (int, float)) and fps > 0:
+                        samples.append(float(fps))
+                except Exception:
+                    pass
+            if not samples:
+                rows.append((task_dir.name, "N/A", 0, "no usable samples"))
+                continue
+            med = statistics.median(samples)
+            task_id = None
+            for jf in task_dir.glob("sample_*/legacy_fps_*.json"):
+                task_id = json.loads(jf.read_text()).get("task_id")
+                break
+            per_task_floor[task_id or task_dir.name] = med
+            rows.append((task_id or task_dir.name, f"{med:.1f}", len(samples),
+                         ", ".join(f"{s:.0f}" for s in samples)))
+
+        lines = ["## Legacy (IsaacLab 2.0) hard-floor collection", "",
+                 "| Task | Median FPS | Samples | Per-sample FPS |", "|---|---:|---:|---|"]
+        for task, med, n, detail in rows:
+            lines.append(f"| {task} | {med} | {n} | {detail} |")
+        lines += ["", "Suggested `fps_mean_floor` entries (physx, no margin):", "",
+                  "```json",
+                  json.dumps({gpu_key: {t: round(v, 1) for t, v in per_task_floor.items()}}, indent=2),
+                  "```",
+                  "",
+                  "_Copy each task's physx value into that task's `fps_mean_floor` in tasks.json. "
+                  "IsaacLab 2.0 is PhysX-only, so no newton floors are produced._"]
+        text = "\n".join(lines)
+        print(text)
+        with summary.open("a") as fh:
+            fh.write(text + "\n")
+        PY
+
+    - name: Upload legacy floor artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: legacy-floors-${{ github.run_id }}
+        path: legacy-floors/
+        retention-days: 7
+        if-no-files-found: warn
