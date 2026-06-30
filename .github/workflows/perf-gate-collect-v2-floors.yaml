@@ -3,28 +3,35 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-# One-off collection of legacy (IsaacLab 2.0) hard-floor FPS values.
+# One-off collection of legacy (previous-IsaacLab-version) hard-floor FPS values.
 #
 # Purpose: the perf gate's per-task ``fps_mean_floor`` should never sit below the
 # FPS a previous shipped IsaacLab version achieved. This workflow runs the
 # standalone probe (tools/perf_regression_gate/measure_legacy_fps.py) inside a
-# legacy IsaacLab 2.0 / Isaac Sim 4.5 image on the SAME RTX PRO 6000 fleet the
-# gate runs on, so the measured FPS is directly comparable, then prints a
-# ready-to-paste ``fps_mean_floor`` block for tasks.json.
+# legacy IsaacLab image on the SAME RTX PRO 6000 fleet the gate runs on, so the
+# measured FPS is directly comparable, then prints a ready-to-paste
+# ``fps_mean_floor`` block for tasks.json.
 #
-# This is deliberately manual (workflow_dispatch only) and NEVER writes anything:
-# it just measures and reports. Copy the printed numbers into tasks.json by hand.
+# Default image: IsaacLab 2.2.0 (Isaac Sim 5.0). This is the OLDEST shipped
+# release that runs on the Blackwell fleet — 2.0.x/2.1.x ship PyTorch 2.5.1 with
+# no sm_120 kernels and an Isaac Sim 4.5 renderer lacking Blackwell paths, so they
+# fail with "no kernel image is available for execution on the device" on RTX PRO
+# 6000. 2.2.0 ships torch 2.7.0+cu128 (Blackwell kernels) and the Isaac Sim 5.0
+# Blackwell fixes.
+#
+# This is deliberately manual and NEVER writes anything: it just measures and
+# reports. Copy the printed numbers into tasks.json by hand.
 #
 # IMPORTANT:
-#   * IsaacLab 2.0 is PhysX-only — there is no Newton backend to measure. Only
-#     physx floors come out of this run.
-#   * The probe is mounted into the legacy image; the legacy image's own 2.0
-#     source/isaaclab install is used (we do NOT overlay current repo source,
-#     which would defeat the point).
-#   * ``image_ref`` MUST be an image the fleet can pull that contains IsaacLab 2.0
-#     + Isaac Sim 4.5. Provide it explicitly; there is no safe default.
+#   * The default release is PhysX-era (no Newton backend), so only physx floors
+#     come out of this run.
+#   * The probe is mounted into the legacy image; the legacy image's own isaaclab
+#     install is used (we do NOT overlay current repo source, which would defeat
+#     the point).
+#   * ``image_ref`` MUST be an image the fleet can pull that the Blackwell GPUs can
+#     actually execute (>= IsaacLab 2.2.0 / Isaac Sim 5.0).
 
-name: Performance Gate - Collect Legacy (2.0) Floors
+name: Performance Gate - Collect Legacy Floors
 
 on:
   # The shared GPU fleet does not grant runners to pull_request events, and a
@@ -36,13 +43,13 @@ on:
   workflow_dispatch:
     inputs:
       image_ref:
-        description: "Pullable IsaacLab 2.0 / Isaac Sim 4.5 image. Default is the public minimal 2.0 container on NGC."
+        description: "Pullable, Blackwell-capable legacy IsaacLab image (>= 2.2.0 / Isaac Sim 5.0). Default is the public minimal 2.2.0 container on NGC."
         required: false
-        default: "nvcr.io/nvidia/isaac-lab:2.0.0"
+        default: "nvcr.io/nvidia/isaac-lab:2.2.0"
       cells:
         description: >-
           JSON array of cells to measure. Each: {"task","num_envs","num_frames","excluded","cameras"?}.
-          'task' is the 2.0 gym id (may differ from current, e.g. has a -v0 suffix).
+          'task' is the legacy gym id (may differ from current, e.g. Cartpole is '-v0' here).
         required: false
         default: >-
           [
@@ -86,14 +93,14 @@ jobs:
       with:
         fetch-depth: 1
 
-    - name: Pull legacy IsaacLab 2.0 image
+    - name: Pull legacy IsaacLab image
       env:
         # Fall back to the default when push-triggered (inputs.* is empty on push).
-        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.0.0' }}
+        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.2.0' }}
       run: |
         set -euo pipefail
         if [ -z "${CI_IMAGE_REF}" ]; then
-          echo "::error::image_ref is empty (expected a pullable IsaacLab 2.0 / Isaac Sim 4.5 image)."
+          echo "::error::image_ref is empty (expected a pullable, Blackwell-capable IsaacLab image >= 2.2.0)."
           exit 1
         fi
         # The runner's docker credential store backend is broken ("not implemented"),
@@ -122,7 +129,8 @@ jobs:
       run: |
         set -euo pipefail
         # Default cell set when push-triggered (no inputs): the physx cells of the
-        # current matrix that exist in IsaacLab 2.0, using their 2.0 gym ids.
+        # current matrix that exist in the legacy release, using their legacy gym
+        # ids (Cartpole is '-v0' in 2.2.0; current gate dropped the suffix).
         if [ -z "${CELLS}" ]; then
           CELLS='[
             {"task":"Isaac-Cartpole-Direct-v0","num_envs":4096,"num_frames":300,"excluded":"0-100"},
@@ -236,7 +244,7 @@ jobs:
             rows.append((task_id or task_dir.name, f"{med:.1f}", len(samples),
                          ", ".join(f"{s:.0f}" for s in samples)))
 
-        lines = ["## Legacy (IsaacLab 2.0) hard-floor collection", "",
+        lines = ["## Legacy IsaacLab hard-floor collection", "",
                  "| Task | Median FPS | Samples | Per-sample FPS |", "|---|---:|---:|---|"]
         for task, med, n, detail in rows:
             lines.append(f"| {task} | {med} | {n} | {detail} |")
@@ -246,7 +254,9 @@ jobs:
                   "```",
                   "",
                   "_Copy each task's physx value into that task's `fps_mean_floor` in tasks.json. "
-                  "IsaacLab 2.0 is PhysX-only, so no newton floors are produced._"]
+                  "The legacy release is PhysX-era, so no newton floors are produced. "
+                  "Note: 2.2.0 registers Cartpole as `Isaac-Cartpole-Direct-v0`; the current gate "
+                  "uses `Isaac-Cartpole-Direct` (no suffix)._"]
         text = "\n".join(lines)
         print(text)
         with summary.open("a") as fh:

@@ -4,13 +4,15 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """Self-contained effective-FPS probe for collecting hard-floor values from an
-older IsaacLab release (e.g. IsaacLab 2.0).
+older IsaacLab release.
 
 This script is intentionally **standalone**: it imports nothing from the perf
-gate tooling, so it can be mounted into an arbitrary IsaacLab container (a 2.0 /
-Isaac Sim 4.5 image) and still run. It reproduces *exactly* the FPS metric the
-gate's oracle compares on, so a number measured here is directly usable as an
-``fps_mean_floor`` entry in ``tasks.json``:
+gate tooling, so it can be mounted into an arbitrary IsaacLab container and still
+run. In practice the floor is collected from the oldest release that runs on the
+Blackwell fleet — IsaacLab 2.2.0 (Isaac Sim 5.0); 2.0.x/2.1.x ship PyTorch 2.5.1
+with no sm_120 kernels and cannot execute on RTX PRO 6000. It reproduces *exactly*
+the FPS metric the gate's oracle compares on, so a number measured here is
+directly usable as an ``fps_mean_floor`` entry in ``tasks.json``:
 
 * per-frame effective FPS = ``num_envs / env.step() wall time [s]``
 * the reported figure is the arithmetic **mean over kept frames** (warmup frames
@@ -19,11 +21,11 @@ gate's oracle compares on, so a number measured here is directly usable as an
 
 Only stable APIs are used (``isaaclab.app.AppLauncher``, ``gymnasium``,
 ``torch``, ``isaaclab_tasks``), all present since the 2.0 rename of
-``omni.isaac.lab`` -> ``isaaclab``. Newton does not exist in 2.0; this probe is
-physics-backend agnostic and simply benchmarks whatever the release's default
-(PhysX) provides.
+``omni.isaac.lab`` -> ``isaaclab``. Newton does not exist in these PhysX-era
+releases; this probe is physics-backend agnostic and simply benchmarks whatever
+the release's default (PhysX) provides.
 
-Example (inside a 2.0 container)::
+Example (inside a legacy container)::
 
     ./isaaclab.sh -p tools/perf_regression_gate/measure_legacy_fps.py \
         --task Isaac-Cartpole-Direct-v0 --num_envs 4096 --num_frames 300 \
