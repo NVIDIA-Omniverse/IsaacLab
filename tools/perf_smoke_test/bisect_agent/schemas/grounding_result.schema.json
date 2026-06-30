@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GroundingResult",
+  "description": "Schema for grounding phase output",
+  "type": "object",
+  "required": [
+    "good_sha",
+    "bad_sha",
+    "task_id",
+    "backend",
+    "separated",
+    "kpis_regressing",
+    "kpi_deltas",
+    "verdict"
+  ],
+  "properties": {
+    "good_sha": {
+      "type": "string",
+      "description": "Known-good commit SHA"
+    },
+    "bad_sha": {
+      "type": "string",
+      "description": "Known-bad commit SHA"
+    },
+    "task_id": {
+      "type": "string",
+      "description": "IsaacLab task identifier"
+    },
+    "backend": {
+      "type": "string",
+      "description": "Backend key"
+    },
+    "separated": {
+      "type": "boolean",
+      "description": "True if good and bad distributions are statistically separated"
+    },
+    "kpis_regressing": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "KPI names with separation_ratio >= 1.5"
+    },
+    "kpi_deltas": {
+      "type": "object",
+      "description": "Relative change percent per KPI: {kpi_name: pct_change}",
+      "additionalProperties": {"type": "number"}
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["PROCEED", "WARN_NO_SEPARATION", "WARN_HIGH_VARIANCE"],
+      "description": "Grounding verdict controlling whether bisect should proceed"
+    },
+    "n_good": {
+      "type": "integer",
+      "description": "Number of good-SHA runs completed",
+      "minimum": 1
+    },
+    "n_bad": {
+      "type": "integer",
+      "description": "Number of bad-SHA runs completed",
+      "minimum": 1
+    },
+    "good_stats": {
+      "type": "object",
+      "description": "Per-KPI statistics for the good SHA runs",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "median": {"type": "number"},
+          "mad": {"type": "number"},
+          "cv": {"type": "number"},
+          "n": {"type": "integer"}
+        }
+      }
+    },
+    "bad_stats": {
+      "type": "object",
+      "description": "Per-KPI statistics for the bad SHA runs",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "median": {"type": "number"},
+          "mad": {"type": "number"},
+          "cv": {"type": "number"},
+          "n": {"type": "integer"}
+        }
+      }
+    },
+    "separation_ratios": {
+      "type": "object",
+      "description": "Separation ratio per KPI: |good_median - bad_median| / max(good_mad, bad_mad)",
+      "additionalProperties": {"type": "number"}
+    },
+    "high_variance_tasks": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "KPI names whose CV exceeded cv_threshold even after n_max runs"
+    },
+    "note": {
+      "type": ["string", "null"],
+      "description": "Human-readable note about the grounding result"
+    }
+  },
+  "additionalProperties": false
+}

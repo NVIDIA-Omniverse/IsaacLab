@@ -115,6 +115,17 @@ def _parse_args() -> argparse.Namespace:
         default=_MODULE_DIR / "gate_config.json",
         help="Path to gate_config.json (controls advisory vs blocking mode)",
     )
+    p.add_argument(
+        "--bench_script",
+        type=Path,
+        default=None,
+        metavar="SCRIPT",
+        help=(
+            "Override the benchmark script: calls it directly with sys.executable "
+            "instead of ./isaaclab.sh -p (useful for dev/stub mode without Isaac Sim). "
+            "Example: --bench_script tools/perf_smoke_test/dev/stub_benchmark.py"
+        ),
+    )
     return p.parse_args()
 
 
@@ -164,12 +175,25 @@ def _fps_mean_floor(task: TaskConfig, gpu_model: str) -> float:
     return 0.0
 
 
-def _isaaclab_cmd(bench_script: Path, task: TaskConfig, artifact_dir: Path) -> list[str]:
-    """Build the ./isaaclab.sh -p benchmark_non_rl.py command for one task/backend."""
-    cmd = [
-        str(_REPO_ROOT / "isaaclab.sh"),
-        "-p",
-        str(bench_script),
+def _isaaclab_cmd(
+    bench_script: Path,
+    task: TaskConfig,
+    artifact_dir: Path,
+    *,
+    bench_script_override: Path | None = None,
+) -> list[str]:
+    """Build the benchmark command for one task/backend.
+
+    Normal mode: ./isaaclab.sh -p benchmark_non_rl.py ...
+    Override mode (--bench_script): sys.executable <override> ... (no isaaclab.sh wrapper)
+    """
+    if bench_script_override is not None:
+        cmd = [sys.executable, str(bench_script_override)]
+        # Pass backend_key so stub writes correct metadata and avoids config_mismatch.
+        cmd.extend(["--backend", task.backend_key])
+    else:
+        cmd = [str(_REPO_ROOT / "isaaclab.sh"), "-p", str(bench_script)]
+    cmd.extend([
         "--task",
         task.task_id,
         "--num_envs",
@@ -180,20 +204,26 @@ def _isaaclab_cmd(bench_script: Path, task: TaskConfig, artifact_dir: Path) -> l
         "json",
         "--output_path",
         str(artifact_dir),
-    ]
+    ])
     if task.seed is not None:
         cmd.extend(["--seed", str(task.seed)])
     cmd.extend(_hydra_args(task))
     return cmd
 
 
-def _run_benchmark(task: TaskConfig, artifact_dir: Path, bench_script: Path) -> tuple[int, float]:
+def _run_benchmark(
+    task: TaskConfig,
+    artifact_dir: Path,
+    bench_script: Path,
+    *,
+    bench_script_override: Path | None = None,
+) -> tuple[int, float]:
     """Run benchmark_non_rl.py for one task, streaming output live + writing to log.
 
     Returns (exit_code, wall_time_s).
     """
     log_file = artifact_dir / "benchmark.log"
-    cmd = _isaaclab_cmd(bench_script, task, artifact_dir)
+    cmd = _isaaclab_cmd(bench_script, task, artifact_dir, bench_script_override=bench_script_override)
 
     print(f"  cmd: {' '.join(cmd)}")
     print(f"  log: {log_file}")
@@ -369,7 +399,7 @@ def main() -> int:
         print(f"[{i}/{len(tasks)}] {task.task_id} / {task.backend_key}")
         print(f"  envs={task.num_envs}  frames={task.num_frames}  timeout={task.timeout_minutes}m")
 
-        exit_code, wall_time = _run_benchmark(task, artifact_dir, bench_script)
+        exit_code, wall_time = _run_benchmark(task, artifact_dir, bench_script, bench_script_override=args.bench_script)
 
         was_retried = False
         if exit_code != 0:
@@ -378,7 +408,7 @@ def main() -> int:
             stale = artifact_dir / "perf_smoke_test_info.json"
             if stale.exists():
                 stale.unlink()
-            exit_code, wall_time = _run_benchmark(task, artifact_dir, bench_script)
+            exit_code, wall_time = _run_benchmark(task, artifact_dir, bench_script, bench_script_override=args.bench_script)
             was_retried = True
 
         attempt = 2 if was_retried else 1

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BisectState",
+  "description": "Schema for bisect search state (bisect/state.json), enables mid-search resume",
+  "type": "object",
+  "required": ["lo", "hi", "commits_total", "tested"],
+  "properties": {
+    "lo": {
+      "type": "integer",
+      "description": "Current lower bound index (inclusive) in the commit array",
+      "minimum": 0
+    },
+    "hi": {
+      "type": "integer",
+      "description": "Current upper bound index (inclusive) in the commit array",
+      "minimum": 0
+    },
+    "commits_total": {
+      "type": "integer",
+      "description": "Total number of commits in the search range",
+      "minimum": 1
+    },
+    "tested": {
+      "type": "array",
+      "description": "List of commits tested so far with their bisect verdicts",
+      "items": {
+        "type": "object",
+        "required": ["sha", "index", "verdict"],
+        "properties": {
+          "sha": {"type": "string"},
+          "index": {"type": "integer"},
+          "verdict": {
+            "type": "string",
+            "enum": ["GOOD", "BAD", "SKIP"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "skip_count": {
+      "type": "integer",
+      "description": "Number of SKIP verdicts encountered so far",
+      "minimum": 0
+    },
+    "confirmed_first_bad_index": {
+      "type": ["integer", "null"],
+      "description": "Index in commit array of the confirmed first-bad commit, or null if not yet confirmed"
+    }
+  },
+  "additionalProperties": false
+}

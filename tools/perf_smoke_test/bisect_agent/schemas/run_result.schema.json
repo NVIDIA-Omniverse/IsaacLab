@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunResult",
+  "description": "Schema for one benchmark run result",
+  "type": "object",
+  "required": ["sha", "task_id", "backend", "run_index", "exit_code"],
+  "properties": {
+    "sha": {
+      "type": "string",
+      "description": "Full commit SHA"
+    },
+    "task_id": {
+      "type": "string",
+      "description": "IsaacLab task identifier, e.g. Isaac-Velocity-Flat-G1-Direct"
+    },
+    "backend": {
+      "type": "string",
+      "description": "Backend key, e.g. newton"
+    },
+    "run_index": {
+      "type": "integer",
+      "description": "0-based index of this run within the grounding or bisect batch",
+      "minimum": 0
+    },
+    "exit_code": {
+      "type": "integer",
+      "description": "Exit code from the benchmark process"
+    },
+    "wall_time_s": {
+      "type": ["number", "null"],
+      "description": "Wall-clock time in seconds for the entire run"
+    },
+    "failure_phase": {
+      "type": ["string", "null"],
+      "description": "Non-null if the run failed; one of: import, init, runtime, oom, hang"
+    },
+    "raw_fps_mean": {
+      "type": ["number", "null"],
+      "description": "Mean frames per second across benchmark frames"
+    },
+    "raw_fps_median": {
+      "type": ["number", "null"],
+      "description": "Median frames per second across benchmark frames"
+    },
+    "raw_fps_p5": {
+      "type": ["number", "null"],
+      "description": "5th-percentile frames per second"
+    },
+    "raw_fps_p95": {
+      "type": ["number", "null"],
+      "description": "95th-percentile frames per second"
+    },
+    "gpu_mem_used_mb": {
+      "type": ["number", "null"],
+      "description": "Peak GPU memory used in megabytes"
+    },
+    "artifact_dir": {
+      "type": "string",
+      "description": "Relative path to this run's artifact directory under run_dir"
+    }
+  },
+  "additionalProperties": false
+}

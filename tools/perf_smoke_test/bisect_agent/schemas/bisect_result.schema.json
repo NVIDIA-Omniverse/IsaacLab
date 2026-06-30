@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BisectResult",
+  "description": "Schema for final bisect output (bisect_result.json)",
+  "type": "object",
+  "required": [
+    "first_bad_sha",
+    "prev_good_sha",
+    "commits_tested",
+    "total_commits_in_range"
+  ],
+  "properties": {
+    "first_bad_sha": {
+      "type": "string",
+      "description": "SHA of the first bad commit found by bisection"
+    },
+    "prev_good_sha": {
+      "type": ["string", "null"],
+      "description": "SHA of the last known-good commit (commit immediately before first_bad_sha), or null if first commit in range is bad"
+    },
+    "first_bad_message": {
+      "type": "string",
+      "description": "Commit message of the first bad commit"
+    },
+    "commits_tested": {
+      "type": "integer",
+      "description": "Number of commits tested during bisection",
+      "minimum": 1
+    },
+    "total_commits_in_range": {
+      "type": "integer",
+      "description": "Total number of commits in the search range (good_sha exclusive, bad_sha inclusive)",
+      "minimum": 1
+    },
+    "kpi_deltas": {
+      "type": "object",
+      "description": "KPI relative change percentages from grounding: {kpi_name: pct_change}",
+      "additionalProperties": {"type": "number"}
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Confidence in the identified first_bad_sha"
+    },
+    "skip_count": {
+      "type": "integer",
+      "description": "Number of commits skipped (SKIP verdict) during bisection",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

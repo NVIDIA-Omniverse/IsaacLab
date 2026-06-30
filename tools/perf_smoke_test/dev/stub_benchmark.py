@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -41,15 +42,22 @@ def _presets_for_backend(task_id: str, identity) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task_id")
+    # Accept both --task_id (original) and --task (benchmark_non_rl.py compatible)
+    parser.add_argument("--task_id", "--task", dest="task_id")
     parser.add_argument("--backend")
     parser.add_argument("--num_envs", type=int, default=1)
     parser.add_argument("--num_frames", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out_dir", required=True)
+    # Accept both --out_dir (original) and --output_path (benchmark_non_rl.py compatible)
+    parser.add_argument("--out_dir", "--output_path", dest="out_dir", required=True)
+    # Ignored — present only for benchmark_non_rl.py CLI compatibility
+    parser.add_argument("--benchmark_backend", default=None)
     parser.add_argument("--fps_mean", type=float, default=200.0)
     parser.add_argument("--failure_phase", default="none")
-    args = parser.parse_args()
+    # parse_known_args swallows hydra-style overrides (e.g. presets=newton_mjwarp)
+    args, _ = parser.parse_known_args()
+    # Env var override lets demo scripts control FPS without touching tasks.json
+    args.fps_mean = float(os.environ.get("STUB_FPS_MEAN", args.fps_mean))
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

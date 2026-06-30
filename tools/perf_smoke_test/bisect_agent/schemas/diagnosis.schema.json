@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Diagnosis",
+  "description": "Schema for diagnosis output (report/diagnosis.json)",
+  "type": "object",
+  "required": [
+    "first_bad_sha",
+    "regression_class",
+    "hypotheses",
+    "confidence"
+  ],
+  "properties": {
+    "first_bad_sha": {
+      "type": "string",
+      "description": "SHA of the first bad commit (from bisect_result)"
+    },
+    "regression_class": {
+      "type": "string",
+      "enum": ["upstream_dep", "isaaclab_code", "indeterminate"],
+      "description": "High-level classification of the regression cause"
+    },
+    "hypotheses": {
+      "type": "array",
+      "description": "List of hypotheses investigated by the diagnosis agent",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "evidence", "tested", "conclusion"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Hypothesis identifier, e.g. H1"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of the hypothesis"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Evidence string supporting this hypothesis"
+          },
+          "tested": {
+            "type": "boolean",
+            "description": "Whether an empirical experiment was run to test this hypothesis"
+          },
+          "test_description": {
+            "type": "string",
+            "description": "Description of the experiment run (if tested=true)"
+          },
+          "test_result": {
+            "type": "string",
+            "description": "Outcome of the experiment (if tested=true)"
+          },
+          "conclusion": {
+            "type": "string",
+            "description": "Conclusion from this hypothesis, e.g. CONFIRMED / REFUTED / UNTESTED"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Overall confidence in the diagnosis"
+    },
+    "kpi_impact": {
+      "type": "object",
+      "description": "Per-KPI impact summary: {kpi: {delta_pct, good, bad}}",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "delta_pct": {"type": "number"},
+          "good": {"type": "number"},
+          "bad": {"type": "number"}
+        }
+      }
+    },
+    "root_cause": {
+      "type": ["string", "null"],
+      "description": "Confirmed root cause string, or null if no cause was confirmed at >= medium confidence"
+    },
+    "recommended_actions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Ordered list of recommended actions to resolve the regression"
+    },
+    "experiments_run": {
+      "type": "integer",
+      "description": "Total number of run_experiment calls made during diagnosis",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}
