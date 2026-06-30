@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+_SHA_SHORT = 12  # chars used for display
+
 
 def _get_commits(repo: str, n: int) -> list[str]:
     """Return the n most recent non-merge commit SHAs, newest-first."""
@@ -128,22 +130,22 @@ def main() -> None:
     # Print summary
     print(f"Wrote perf map to {output_path}")
     print(f"Total commits: {total} ({args.good_count} good + {args.bad_count} bad)")
-    print(f"Oldest commit (index 0): {shas_oldest_first[0][:12]}")
-    print(f"Newest commit (index {total-1}): {shas_oldest_first[-1][:12]}")
+    print(f"Oldest commit (index 0): {shas_oldest_first[0][:_SHA_SHORT]}")
+    print(f"Newest commit (index {total-1}): {shas_oldest_first[-1][:_SHA_SHORT]}")
     print()
     print("Good range (fps={:.0f}):".format(args.good_fps))
     for sha in good_shas:
-        print(f"  {sha[:12]}")
+        print(f"  {sha[:_SHA_SHORT]}")
     print()
     print("Bad range (fps={:.0f}):".format(args.bad_fps))
     for sha in bad_shas:
         marker = " <-- expected_first_bad" if sha == first_bad_sha else ""
-        print(f"  {sha[:12]}{marker}")
+        print(f"  {sha[:_SHA_SHORT]}{marker}")
     print()
     print("Key SHAs for bisect command:")
-    print(f"  --good {last_good_sha[:12]}  (last good)")
-    print(f"  --bad  {last_bad_sha[:12]}  (last bad)")
-    print(f"  expected first_bad_sha: {first_bad_sha[:12]}")
+    print(f"  --good {last_good_sha[:_SHA_SHORT]}  (last good)")
+    print(f"  --bad  {last_bad_sha[:_SHA_SHORT]}  (last bad)")
+    print(f"  expected first_bad_sha: {first_bad_sha[:_SHA_SHORT]}")
 
 
 if __name__ == "__main__":

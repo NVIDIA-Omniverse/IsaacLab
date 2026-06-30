@@ -150,7 +150,7 @@ def run_grounding(
     runner_run_commit: callable,  # core/runner.py::run_commit
     *,
     n_start: int = 3,
-    n_max: int = 12,
+    n_max: int = 5,
     cv_threshold: float = 0.08,
 ) -> dict:  # grounding_result schema (4.2)
 ```
@@ -477,7 +477,7 @@ Ordered from first after `good_sha` to `bad_sha` inclusive.
 3. **Every stage checks for its output artifact before running.** If `grounding/result.json`
    exists, skip grounding. `bisect/state.json` enables mid-search resume.
 
-4. **Diagnosis only states conclusions backed by a run.** Untested hypotheses are labeled
+4. **Diagnosis only states conclusions backed by a run or by code.** Untested hypotheses are labeled
    `"tested": false` and never appear in `root_cause`. This is enforced by the diagnostician
    prompt, not by code.
 

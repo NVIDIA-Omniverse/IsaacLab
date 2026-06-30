@@ -8,11 +8,14 @@ scripts directly.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Path setup: allow importing perf_smoke_test modules when needed by callers.
@@ -195,7 +198,13 @@ def _run_dev(
     """Run stub_benchmark.py then build_bench_result.py in dev mode."""
     fps_mean: float = 200.0
     if dev_perf_map is not None:
-        fps_mean = float(dev_perf_map.get(sha, dev_perf_map.get(sha[:7], 200.0)))
+        looked_up = dev_perf_map.get(sha, dev_perf_map.get(sha[:7]))
+        if looked_up is None:
+            logger.warning(
+                "dev_perf_map has no entry for sha=%s; defaulting to fps_mean=200.0", sha[:7],
+            )
+        else:
+            fps_mean = float(looked_up)
 
     # ------------------------------------------------------------------
     # Phase 1: run stub_benchmark.py
@@ -263,11 +272,9 @@ def _run_dev(
     )
 
     if build_proc.returncode != 0:
-        # Non-fatal: we may still get a partial result; log and continue.
-        print(
-            f"[runner] build_bench_result.py exited {build_proc.returncode} "
-            f"for sha={sha[:7]}:\n{build_proc.stderr[-2000:]}",
-            file=sys.stderr,
+        logger.warning(
+            "build_bench_result.py exited %d for sha=%s: %s",
+            build_proc.returncode, sha[:7], build_proc.stderr[-2000:],
         )
 
     return _extract_run_result(

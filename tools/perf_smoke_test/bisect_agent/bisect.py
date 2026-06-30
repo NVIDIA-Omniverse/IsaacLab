@@ -74,6 +74,8 @@ del _ilu, _bisect_spec
 import argparse
 import json
 import logging
+import os
+import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,6 +102,10 @@ logger = logging.getLogger("bisect")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_SHA_LABEL = 7   # shorter prefix used in human-readable names (run dir, CLI output)
+_SHA_SHORT = 12  # longer prefix used in artifact subdirs (matches core modules)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -194,7 +200,7 @@ def main() -> None:
     if args.output_dir:
         output_dir = Path(args.output_dir).resolve()
     else:
-        auto_name = f"{args.task}_{args.backend}_{args.good[:7]}_{args.bad[:7]}"
+        auto_name = f"{args.task}_{args.backend}_{args.good[:_SHA_LABEL]}_{args.bad[:_SHA_LABEL]}"
         output_dir = (_AGENT_DIR / "runs" / auto_name).resolve()
 
     dev_perf_map: dict | None = None
@@ -232,6 +238,30 @@ def main() -> None:
         "started_at": _now_iso(),
     }
     _write_json(output_dir / "run_config.json", run_config)
+
+    # Write env snapshot as first audit entry so every run is reproducible.
+    _env_entry: dict = {
+        "ts": run_config["started_at"],
+        "step": "env_snapshot",
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "cwd": os.getcwd(),
+        "bisect_agent_dir": str(_AGENT_DIR),
+        "env_vars": {k: os.environ.get(k, "") for k in (
+            "BISECT_LLM_MODEL", "BISECT_LLM_BASE_URL",
+            "CUDA_VISIBLE_DEVICES", "STUB_FPS_MEAN",
+        )},
+        "run_config": {
+            "good_sha": args.good,
+            "bad_sha": args.bad,
+            "task_id": args.task,
+            "backend": args.backend,
+            "dev_mode": args.dev,
+        },
+    }
+    _audit_log = output_dir / "audit_log.jsonl"
+    with _audit_log.open("a") as _fh:
+        _fh.write(json.dumps(_env_entry) + "\n")
 
     status: dict = {
         "phase": "init",
@@ -391,30 +421,86 @@ def main() -> None:
         status = {"phase": "orchestrator", "status": "running", "progress": "LLM orchestrator started", "last_update": _now_iso()}
         _write_json(output_dir / "status.json", status)
 
+        import functools
+        from core.grounding import run_grounding as _run_grounding
+        from core.bisector import run_bisect as _run_bisect
+        from core.diagnosis import run_diagnosis as _run_diagnosis
+        from infra.commits import enumerate_commits as _enum_commits
+        from infra.commits import fetch_diff as _fetch_diff
+
         run_orchestrator(
             run_config=run_config,
             run_dir=output_dir,
             llm_client=llm_client,
+            runner_run_commit=_run_commit,
+            commits_enumerate=functools.partial(_enum_commits, repo_path=repo_path),
+            commits_fetch_diff=functools.partial(_fetch_diff, repo_path=repo_path),
+            grounding_run=_run_grounding,
+            bisect_run=_run_bisect,
+            diagnosis_run=_run_diagnosis,
+            dev_mode=args.dev,
+            dev_perf_map=dev_perf_map,
+            repo_path=repo_path,
         )
 
     # ------------------------------------------------------------------
-    # 6. Final summary.
+    # 6. Final summary + run_summary.json
     # ------------------------------------------------------------------
+    import glob
+
+    finished_at = _now_iso()
+    bisect_result_path = output_dir / "bisect_result.json"
+    bisect_result = _read_json(bisect_result_path) if bisect_result_path.exists() else {}
+
+    grounding_runs = len(list(output_dir.glob("grounding/*/run_result.json")))
+    bisect_runs    = len(list(output_dir.glob("bisect/*/run_result.json")))
+    diag_runs      = len(list(output_dir.glob("diagnosis/*/run_result.json")))
+
+    run_summary = {
+        "cli_invocation": " ".join(
+            ["python bisect.py"]
+            + [f"--good {args.good}", f"--bad {args.bad}",
+               f"--task {args.task}", f"--backend {args.backend}"]
+            + (["--dev"] if args.dev else [])
+            + ([f"--dev-perf-map {args.dev_perf_map}"] if args.dev_perf_map else [])
+            + (["--no-llm"] if args.no_llm else [])
+        ),
+        "started_at":  run_config.get("started_at"),
+        "finished_at": finished_at,
+        "good_sha":    args.good,
+        "bad_sha":     args.bad,
+        "task_id":     args.task,
+        "backend":     args.backend,
+        "first_bad_sha": bisect_result.get("first_bad_sha"),
+        "prev_good_sha": bisect_result.get("prev_good_sha"),
+        "confidence":    bisect_result.get("confidence"),
+        "bench_runs": {
+            "grounding":  grounding_runs,
+            "bisect":     bisect_runs,
+            "diagnosis":  diag_runs,
+            "total":      grounding_runs + bisect_runs + diag_runs,
+        },
+        "output_dir": str(output_dir),
+        "audit_log":  str(output_dir / "audit_log.jsonl"),
+        "report":     str(output_dir / "report" / "report.md"),
+    }
+    _write_json(output_dir / "run_summary.json", run_summary)
+
     print("\n=== Run Complete ===")
     print(f"  output_dir : {output_dir}")
-
-    bisect_result_path = output_dir / "bisect_result.json"
-    if bisect_result_path.exists():
-        bisect_result = _read_json(bisect_result_path)
+    if bisect_result:
         print(f"  first_bad  : {bisect_result.get('first_bad_sha', 'unknown')}")
+        print(f"  confidence : {bisect_result.get('confidence', '?')}")
     else:
         print("  first_bad  : (bisect_result.json not found)")
+    print(f"  bench_runs : grounding={grounding_runs}, bisect={bisect_runs}, diagnosis={diag_runs}")
 
     report_path = output_dir / "report" / "report.md"
     if report_path.exists():
         print(f"  report     : {report_path}")
     else:
         print("  report     : (not generated — run without --no-llm for LLM diagnosis)")
+    print(f"  summary    : {output_dir / 'run_summary.json'}")
 
 
 if __name__ == "__main__":

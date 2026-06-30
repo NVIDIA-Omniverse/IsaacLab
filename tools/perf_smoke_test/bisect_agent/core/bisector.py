@@ -25,14 +25,28 @@ from pathlib import Path
 from typing import Callable
 
 # ---------------------------------------------------------------------------
-# Import verdict function — try relative first, fall back to absolute.
+# Import verdict helpers — try relative first, fall back to absolute.
 # ---------------------------------------------------------------------------
 try:
-    from .verdict import classify_bisect_verdict
+    from .verdict import (
+        classify_bisect_verdict,
+        _FAILURE_PHASE_BAD,
+        _FAILURE_PHASE_SKIP,
+        _KPI_FIELDS,
+        _REGRESSION_DIRECTION,
+    )
 except ImportError:
-    from core.verdict import classify_bisect_verdict  # type: ignore[no-redef]
+    from core.verdict import (  # type: ignore[no-redef]
+        classify_bisect_verdict,
+        _FAILURE_PHASE_BAD,
+        _FAILURE_PHASE_SKIP,
+        _KPI_FIELDS,
+        _REGRESSION_DIRECTION,
+    )
 
 logger = logging.getLogger(__name__)
+
+_SHA_SHORT = 12  # chars used for artifact dir names and log messages
 
 # Stop if this many consecutive skips are encountered without making progress.
 _MAX_CONSECUTIVE_SKIPS = 5
@@ -127,21 +141,126 @@ def run_bisect(
     # ------------------------------------------------------------------
     # Helper: run one commit and return (run_result, verdict_str).
     # ------------------------------------------------------------------
-    def _run_and_classify(sha: str) -> tuple[dict, str]:
-        artifact_dir = bisect_dir / sha[:12]
+    audit_path = run_dir / "audit_log.jsonl"
+
+    def _append_audit(entry: dict) -> None:
+        with audit_path.open("a") as fh:
+            fh.write(json.dumps(entry) + "\n")
+
+    def _verdict_reason(
+        verdict: str,
+        failure_phase: str | None,
+        run_result: dict,
+        attempt: int,
+    ) -> str:
+        """One-line explanation of why this verdict was reached."""
+        if failure_phase == "runtime":
+            return f"runtime crash → BAD (commit-caused execution failure)"
+        if failure_phase in _FAILURE_PHASE_BAD:
+            sfx = "" if attempt == 1 else f" (confirmed on attempt {attempt})"
+            return f"{failure_phase} crash → BAD{sfx}"
+        if failure_phase in _FAILURE_PHASE_SKIP:
+            return f"infra failure ({failure_phase}) after {attempt} attempt(s) → SKIP"
+        if verdict == "SKIP":
+            return "no KPI output (benchmark produced no fps data)"
+        # GOOD or BAD from KPI comparison
+        parts: list[str] = []
+        for kpi in kpis_regressing:
+            field = _KPI_FIELDS.get(kpi)
+            if not field:
+                continue
+            val = run_result.get(field)
+            gs = good_stats.get(kpi, {})
+            if val is None or not gs:
+                continue
+            med: float = gs.get("median", 0.0)
+            mad: float = gs.get("mad", 0.0)
+            direction = _REGRESSION_DIRECTION.get(kpi, "lower")
+            if direction == "lower":
+                threshold = med - 2.0 * mad
+                cmp = f"{val:.0f} {'<' if val < threshold else '>='} threshold={threshold:.0f}"
+            else:
+                threshold = med + 2.0 * mad
+                cmp = f"{val:.0f} {'>' if val > threshold else '<='} threshold={threshold:.0f}"
+            parts.append(f"{kpi}={cmp}")
+        summary = "; ".join(parts) if parts else "KPIs evaluated"
+        return f"{verdict}: {summary}"
+
+    def _run_and_classify(sha: str, *, attempt: int = 1) -> tuple[dict, str]:
+        """Run sha and return (run_result, verdict). Retries up to 3 total attempts.
+
+        Retry policy (3 total attempts):
+        - ``runtime`` → BAD immediately (clear execution crash, always commit-caused).
+        - ``import``/``init`` on attempt 1 → retry once (might be agent env fluke);
+          if still failing on attempt 2 → BAD (confirmed commit-caused).
+        - Infra failures (``oom``, ``hang``, ``driver``, etc.) → retry up to 3 total;
+          if still failing after all retries → SKIP.
+        """
+        suffix = "" if attempt == 1 else f"_retry{attempt}"
+        artifact_dir = bisect_dir / f"{sha[:_SHA_SHORT]}{suffix}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Bisect: running commit %s → %s", sha[:12], artifact_dir)
+        logger.info("Bisect: running %s (attempt %d) → %s", sha[:_SHA_SHORT], attempt, artifact_dir)
+
         run_result = runner_run_commit(
-            sha,
-            task_id,
-            backend,
-            artifact_dir,
-            dev_mode=dev_mode,
-            dev_perf_map=dev_perf_map,
+            sha, task_id, backend, artifact_dir,
+            dev_mode=dev_mode, dev_perf_map=dev_perf_map,
         )
         run_result["artifact_dir"] = str(artifact_dir.relative_to(run_dir))
+
         verdict = classify_bisect_verdict(run_result, good_stats, kpis_regressing)
-        logger.info("Bisect: %s → %s", sha[:12], verdict)
+        failure_phase = run_result.get("failure_phase")
+
+        # ---- Retry decisions ------------------------------------------------
+        if attempt < 3:
+            # import/init: could be agent-side env setup fluke — retry once.
+            # runtime: always BAD immediately (execution crash = commit-caused).
+            if failure_phase in {"import", "init"} and attempt == 1:
+                logger.info(
+                    "Bisect: %s → %s (attempt 1); retrying to confirm commit-caused.",
+                    sha[:_SHA_SHORT], failure_phase,
+                )
+                _append_audit({
+                    "ts": _now_iso(), "step": "bisect_retry",
+                    "sha": sha, "attempt": 1, "failure_phase": failure_phase,
+                    "reason": (
+                        f"{failure_phase} on attempt 1 — retrying to distinguish "
+                        "commit-caused crash from agent env setup fluke"
+                    ),
+                })
+                return _run_and_classify(sha, attempt=2)
+
+            # Infra failures: retry up to 3 total.
+            if verdict == "SKIP" and failure_phase in _FAILURE_PHASE_SKIP:
+                logger.info(
+                    "Bisect: %s → SKIP (infra: %s, attempt %d); retrying.",
+                    sha[:_SHA_SHORT], failure_phase, attempt,
+                )
+                _append_audit({
+                    "ts": _now_iso(), "step": "bisect_retry",
+                    "sha": sha, "attempt": attempt, "failure_phase": failure_phase,
+                    "reason": f"infra skip ({failure_phase}) on attempt {attempt}; retrying",
+                })
+                return _run_and_classify(sha, attempt=attempt + 1)
+
+        # ---- Final verdict — write structured audit record ------------------
+        reason = _verdict_reason(verdict, failure_phase, run_result, attempt)
+        audit_entry: dict = {
+            "ts": _now_iso(), "step": "bisect",
+            "sha": sha, "attempt": attempt,
+            "verdict": verdict,
+            "failure_phase": failure_phase,
+            "fps_mean": run_result.get("raw_fps_mean"),
+            "gpu_mem_mb": run_result.get("gpu_mem_used_mb"),
+            "reason": reason,
+        }
+        for kpi in kpis_regressing:
+            gs = good_stats.get(kpi, {})
+            if gs:
+                audit_entry[f"good_median_{kpi}"] = gs.get("median")
+                audit_entry[f"good_mad_{kpi}"] = gs.get("mad")
+        _append_audit(audit_entry)
+
+        logger.info("Bisect: %s (attempt %d) → %s  [%s]", sha[:_SHA_SHORT], attempt, verdict, reason)
         return run_result, verdict
 
     # ------------------------------------------------------------------
@@ -183,7 +302,7 @@ def run_bisect(
             logger.info(
                 "Bisect: index %d (%s) already tested → %s (from state)",
                 mid,
-                sha[:12],
+                sha[:_SHA_SHORT],
                 prev_verdict,
             )
             verdict = prev_verdict
@@ -289,10 +408,11 @@ def run_bisect(
         # first_bad is the first commit after good_sha — fall back to grounding's good_sha
         prev_good_sha = grounding_result.get("good_sha")
 
-    # If we didn't actually test the convergence point yet, run it once to
-    # confirm (unless we exhausted skips).
-    if first_bad_index not in tested_by_index and skip_count < _MAX_CONSECUTIVE_SKIPS:
-        logger.info("Bisect: confirming first_bad %s with one final run.", first_bad_sha[:12])
+    # If we didn't actually test the convergence point yet, run it once to confirm.
+    # We always attempt this regardless of skip_count — an untested convergence point
+    # means the result is based only on boundary shrinkage, not a measured verdict.
+    if first_bad_index not in tested_by_index:
+        logger.info("Bisect: confirming first_bad %s with one final run.", first_bad_sha[:_SHA_SHORT])
         _, confirm_verdict = _run_and_classify(first_bad_sha)
         tested.append(
             {"sha": first_bad_sha, "index": first_bad_index, "verdict": confirm_verdict}
@@ -344,8 +464,8 @@ def run_bisect(
 
     logger.info(
         "Bisect complete: first_bad=%s prev_good=%s confidence=%s commits_tested=%d skip_count=%d",
-        first_bad_sha[:12],
-        prev_good_sha[:12] if prev_good_sha else "None",
+        first_bad_sha[:_SHA_SHORT],
+        prev_good_sha[:_SHA_SHORT] if prev_good_sha else "None",
         confidence,
         commits_tested_count,
         skip_count,

@@ -72,12 +72,31 @@ _REGRESSION_DIRECTION: dict[str, str] = {
 # Primary KPIs used for separation / bisect verdict decisions (in priority order)
 _PRIMARY_KPIS: tuple[str, ...] = ("fps_mean", "fps_p5", "fps_median")
 
+# KPIs excluded from bisect verdict and kpis_regressing.
+# wall_time_s has very high CV in production and is exactly 0 in dev mode —
+# including it produces false regression signals and should not drive verdicts.
+# It remains in _KPI_FIELDS so compute_kpi_stats reports it for informational use.
+_VERDICT_EXCLUDE_KPIS: frozenset[str] = frozenset({"wall_time_s"})
+
+# Grounding CV threshold — a primary KPI with CV above this triggers more runs.
+_CV_THRESHOLD: float = 0.08
+
 # Separation thresholds
 _SEP_RATIO_THRESHOLD: float = 1.5
 _REL_CHANGE_THRESHOLD_PCT: float = 5.0
 
 # Bisect thresholds (in MAD units from good median)
 _BISECT_BAD_MAD_FACTOR: float = 2.0
+
+# failure_phase values that indicate the commit itself caused the failure (→ BAD).
+# Mirrors oracle.py's _BISECT_BAD_PHASES plus "import" which oracle also considers bad.
+_FAILURE_PHASE_BAD: frozenset[str] = frozenset({"import", "init", "runtime"})
+
+# failure_phase values that indicate an infrastructure / environment problem (→ SKIP).
+_FAILURE_PHASE_SKIP: frozenset[str] = frozenset({
+    "oom", "hang", "driver", "config_mismatch",
+    "runner_error", "missing_result",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +225,7 @@ def check_separation(good_stats: dict, bad_stats: dict) -> dict:
             # Regression = bad_median > good_median → rel_change_pct > 0
             in_regression_direction = rel_change_pct > _REL_CHANGE_THRESHOLD_PCT
 
-        if sep_ratio >= _SEP_RATIO_THRESHOLD and in_regression_direction:
+        if sep_ratio >= _SEP_RATIO_THRESHOLD and in_regression_direction and kpi not in _VERDICT_EXCLUDE_KPIS:
             kpis_regressing.append(kpi)
 
     separated = len(kpis_regressing) > 0
@@ -258,15 +277,28 @@ def classify_bisect_verdict(
 
     Rules
     -----
-    - **SKIP** if ``failure_phase`` is non-null or ``raw_fps_mean`` is absent.
+    - **BAD** immediately if ``failure_phase`` is in ``_FAILURE_PHASE_BAD``
+      (``import``, ``init``, ``runtime``): the commit itself caused the crash.
+    - **SKIP** if ``failure_phase`` is in ``_FAILURE_PHASE_SKIP``
+      (``oom``, ``hang``, ``driver``, ``config_mismatch``, infra errors):
+      infrastructure/environment problem — not caused by the commit.
+    - **SKIP** if ``raw_fps_mean`` is absent (benchmark produced no output).
     - **BAD** if, for the regressing KPIs, the run's value crosses the threshold
       defined as ``good_median ± _BISECT_BAD_MAD_FACTOR * good_mad`` in the
       regression direction.
     - **GOOD** otherwise.
     """
-    # SKIP: failed runs or missing primary KPI
-    if run_result.get("failure_phase") is not None:
+    failure_phase = run_result.get("failure_phase")
+
+    # Commit-caused crash → BAD (mirrors oracle.py _BISECT_BAD_PHASES + import)
+    if failure_phase in _FAILURE_PHASE_BAD:
+        return "BAD"
+
+    # Infrastructure failure → SKIP (retry policy handled by bisector)
+    if failure_phase is not None:
         return "SKIP"
+
+    # No FPS output → SKIP
     if run_result.get("raw_fps_mean") is None:
         return "SKIP"
 
