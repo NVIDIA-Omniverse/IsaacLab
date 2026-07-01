@@ -203,12 +203,23 @@ jobs:
                   --headless
                 RC=\$?
                 set -e
-                OUT_JSON=\"\$(find \"\$ISAACLAB_ROOT\" /tmp /root -type f -name '*.json' -newer /tmp/.benchstart 2>/dev/null | xargs -r grep -l 'Environment step effective FPS' 2>/dev/null | head -1)\"
+                # Locate the output json. Try likely dirs first, then fall back to a
+                # whole-rootfs scan (-xdev skips bind mounts). Match on the metric key so
+                # we ignore unrelated json (configs, manifests, etc.).
+                FRESH=\"\$(find \"\$ISAACLAB_ROOT\" /tmp /root /isaac-sim -type f -name '*.json' -newer /tmp/.benchstart 2>/dev/null)\"
+                if [ -z \"\$FRESH\" ]; then
+                  FRESH=\"\$(find / -xdev -type f -name '*.json' -newer /tmp/.benchstart 2>/dev/null)\"
+                fi
+                OUT_JSON=\"\$(echo \"\$FRESH\" | xargs -r grep -l 'Environment step effective FPS' 2>/dev/null | head -1)\"
                 if [ -n \"\$OUT_JSON\" ]; then
                   cp \"\$OUT_JSON\" /tmp/floor_out/benchmark_output.json
                   echo \"collected \$OUT_JSON (benchmark rc=\$RC)\"
                 else
-                  echo \"::warning::no benchmark json with FPS series found (rc=\$RC)\"
+                  echo \"::warning::no benchmark json with FPS series found (rc=\$RC). fresh json files:\"
+                  echo \"\$FRESH\" | head -20
+                  # keep the newest fresh json so the structure can be inspected offline.
+                  NEWEST=\"\$(echo \"\$FRESH\" | xargs -r ls -1t 2>/dev/null | head -1)\"
+                  if [ -n \"\$NEWEST\" ]; then cp \"\$NEWEST\" /tmp/floor_out/debug_newest.json; fi
                 fi
               " 2>&1 | tee "${SAMPLE_DIR}/run.log" || echo "::warning::${TASK} sample ${s} failed (see log)"
             echo "::endgroup::"
