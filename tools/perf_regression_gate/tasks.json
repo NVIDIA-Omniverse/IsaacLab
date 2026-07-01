@@ -23,9 +23,6 @@
         "L40S": {
           "physx": 100.0,
           "newton": 0.0
-        },
-        "rtx_pro_6000_blackwell": {
-          "physx": 367420.9
         }
       }
     },
@@ -38,9 +35,6 @@
       "fps_mean_floor": {
         "L40S": {
           "physx": 30.0
-        },
-        "rtx_pro_6000_blackwell": {
-          "physx": 1211.6
         }
       }
     },
@@ -74,9 +68,6 @@
         "L40S": {
           "physx": 40.0,
           "newton": 0.0
-        },
-        "rtx_pro_6000_blackwell": {
-          "physx": 12634.3
         }
       }
     }

@@ -6,11 +6,11 @@
 # One-off collection of legacy (previous-IsaacLab-version) hard-floor FPS values.
 #
 # Purpose: the perf gate's per-task ``fps_mean_floor`` should never sit below the
-# FPS a previous shipped IsaacLab version achieved. This workflow runs the
-# standalone probe (tools/perf_regression_gate/measure_legacy_fps.py) inside a
-# legacy IsaacLab image on the SAME RTX PRO 6000 fleet the gate runs on, so the
-# measured FPS is directly comparable, then prints a ready-to-paste
-# ``fps_mean_floor`` block for tasks.json.
+# FPS a previous shipped IsaacLab version achieved. This workflow runs the legacy
+# image's OWN ``scripts/benchmarks/benchmark_non_rl.py`` (the exact benchmark the
+# gate uses, not a re-implementation) on the SAME RTX PRO 6000 fleet, then reduces
+# its ``Environment step effective FPS`` series the same way the oracle does (mean
+# over kept frames) and prints a ready-to-paste ``fps_mean_floor`` block.
 #
 # Default image: IsaacLab 2.2.0 (Isaac Sim 5.0). This is the OLDEST shipped
 # release that runs on the Blackwell fleet — 2.0.x/2.1.x ship PyTorch 2.5.1 with
@@ -25,9 +25,9 @@
 # IMPORTANT:
 #   * The default release is PhysX-era (no Newton backend), so only physx floors
 #     come out of this run.
-#   * The probe is mounted into the legacy image; the legacy image's own isaaclab
-#     install is used (we do NOT overlay current repo source, which would defeat
-#     the point).
+#   * Nothing is mounted into the container except output dirs; the image's own
+#     benchmark_non_rl.py + isaaclab install are used (we do NOT overlay current
+#     repo source, which would defeat the point).
 #   * ``image_ref`` MUST be an image the fleet can pull that the Blackwell GPUs can
 #     actually execute (>= IsaacLab 2.2.0 / Isaac Sim 5.0).
 
@@ -60,7 +60,7 @@ on:
       samples:
         description: "Repetitions per cell (the reported floor is the median of these)."
         required: false
-        default: "5"
+        default: "10"
       seed:
         description: "Environment seed for every run."
         required: false
@@ -120,11 +120,11 @@ jobs:
         docker tag "${CI_IMAGE_REF}" "${{ env.LEGACY_IMAGE_TAG }}"
         rm -rf "${DOCKER_CONFIG_DIR}"
 
-    - name: Run legacy FPS probe per cell
+    - name: Run 2.2.0 benchmark_non_rl.py per cell
       env:
         # inputs.* are empty on push-triggered runs; fall back to the dispatch defaults.
         CELLS: ${{ inputs.cells }}
-        SAMPLES: ${{ inputs.samples || '5' }}
+        SAMPLES: ${{ inputs.samples || '10' }}
         SEED: ${{ inputs.seed || '42' }}
       run: |
         set -euo pipefail
@@ -139,7 +139,6 @@ jobs:
           ]'
         fi
         OUT_ROOT="${{ github.workspace }}/legacy-floors"
-        SCRIPT="${{ github.workspace }}/tools/perf_regression_gate/measure_legacy_fps.py"
         mkdir -p "${OUT_ROOT}" "${{ github.workspace }}/kit-cache" "${{ github.workspace }}/jit-cache/warp" "${{ github.workspace }}/jit-cache/nv"
         chmod -R 0777 "${OUT_ROOT}" "${{ github.workspace }}/kit-cache" "${{ github.workspace }}/jit-cache"
 
@@ -149,13 +148,12 @@ jobs:
           NUM_ENVS="$(echo "${cell}" | jq -r '.num_envs')"
           NUM_FRAMES="$(echo "${cell}" | jq -r '.num_frames // 300')"
           EXCLUDED="$(echo "${cell}" | jq -r '.excluded // "0-100"')"
-          CAMERAS="$(echo "${cell}" | jq -r '.cameras // false')"
           SAFE_TASK="$(echo "${TASK}" | tr -c 'a-zA-Z0-9' '-')"
-
-          CAM_FLAG=""
-          if [ "${CAMERAS}" = "true" ]; then
-            CAM_FLAG="--enable_cameras"
-          fi
+          mkdir -p "${OUT_ROOT}/${SAFE_TASK}"
+          # Persist the exact gym id + excluded-frame spec so the aggregate step can
+          # reproduce the oracle's measured_fps (mean over kept frames).
+          echo "${TASK}" > "${OUT_ROOT}/${SAFE_TASK}/task_id.txt"
+          echo "${EXCLUDED}" > "${OUT_ROOT}/${SAFE_TASK}/excluded.txt"
 
           for s in $(seq 1 "${SAMPLES}"); do
             SAMPLE_DIR="${OUT_ROOT}/${SAFE_TASK}/sample_${s}"
@@ -163,8 +161,9 @@ jobs:
             CONTAINER="legacy-floor-${SAFE_TASK}-${s}-${{ github.run_id }}"
             echo "::group::${TASK} sample ${s}/${SAMPLES}"
             docker rm -f "${CONTAINER}" 2>/dev/null || true
-            # Mount ONLY the standalone probe into the legacy image; use the image's
-            # own 2.0 isaaclab install (do NOT overlay current repo source).
+            # Run the image's OWN scripts/benchmarks/benchmark_non_rl.py against its
+            # own 2.2.0 install (we do NOT overlay current repo source). physx backend
+            # => no presets/hydra args, exactly matching the gate's physx launch path.
             docker run --rm --name "${CONTAINER}" \
               --init --stop-timeout 10 --entrypoint bash \
               --gpus all --network=host \
@@ -174,16 +173,12 @@ jobs:
               -e OMNI_KIT_DISABLE_CUP=1 -e ISAAC_SIM_HEADLESS=1 \
               -e PYTHONUNBUFFERED=1 -e PYTHONDONTWRITEBYTECODE=1 \
               -e WARP_CACHE_PATH=/tmp/jit-cache/warp -e CUDA_CACHE_PATH=/tmp/jit-cache/nv \
-              -v "${SCRIPT}:/tmp/measure_legacy_fps.py:ro" \
               -v "${SAMPLE_DIR}:/tmp/floor_out" \
               -v "${{ github.workspace }}/jit-cache:/tmp/jit-cache" \
               -v "${{ github.workspace }}/kit-cache:/isaac-sim/kit/cache" \
               "${{ env.LEGACY_IMAGE_TAG }}" \
               -c "
                 set -e
-                # The fork's images install IsaacLab at /workspace/isaaclab, but the
-                # public minimal 2.0 container ships source at /workspace/IsaacLab.
-                # Auto-detect rather than hard-code so either image works.
                 ISAACLAB_ROOT=''
                 for d in /workspace/isaaclab /workspace/IsaacLab /root/IsaacLab /isaac-lab; do
                   if [ -x \"\$d/isaaclab.sh\" ]; then ISAACLAB_ROOT=\"\$d\"; break; fi
@@ -194,14 +189,27 @@ jobs:
                 cd \"\$ISAACLAB_ROOT\"
                 rm -f _isaac_sim
                 ln -s /isaac-sim _isaac_sim
-                ./isaaclab.sh -p /tmp/measure_legacy_fps.py \
+                touch /tmp/.benchstart
+                # The 2.2.0 script has no --output_path arg; its JSONFileMetrics backend
+                # writes to a services-chosen path. Run it, then grab the freshest json
+                # that actually contains the effective-FPS series.
+                set +e
+                ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py \
                   --task '${TASK}' \
                   --num_envs ${NUM_ENVS} \
                   --num_frames ${NUM_FRAMES} \
-                  --excluded_frames ${EXCLUDED} \
+                  --benchmark_backend JSONFileMetrics \
                   --seed ${SEED} \
-                  --headless ${CAM_FLAG} \
-                  --output_path /tmp/floor_out
+                  --headless
+                RC=\$?
+                set -e
+                OUT_JSON=\"\$(find \"\$ISAACLAB_ROOT\" /tmp /root -type f -name '*.json' -newer /tmp/.benchstart 2>/dev/null | xargs -r grep -l 'Environment step effective FPS' 2>/dev/null | head -1)\"
+                if [ -n \"\$OUT_JSON\" ]; then
+                  cp \"\$OUT_JSON\" /tmp/floor_out/benchmark_output.json
+                  echo \"collected \$OUT_JSON (benchmark rc=\$RC)\"
+                else
+                  echo \"::warning::no benchmark json with FPS series found (rc=\$RC)\"
+                fi
               " 2>&1 | tee "${SAMPLE_DIR}/run.log" || echo "::warning::${TASK} sample ${s} failed (see log)"
             echo "::endgroup::"
           done
@@ -221,30 +229,68 @@ jobs:
         gpu_key = os.environ.get("GPU_KEY", "rtx_pro_6000_blackwell")
         summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
 
+        def expand_excluded(spec: str) -> set[int]:
+            idx: set[int] = set()
+            for tok in (spec or "").split():
+                tok = tok.strip()
+                if not tok:
+                    continue
+                if "-" in tok:
+                    lo, hi = tok.split("-", 1)
+                    idx.update(range(int(lo), int(hi) + 1))  # inclusive, matches oracle
+                else:
+                    idx.add(int(tok))
+            return idx
+
+        def find_series(obj):
+            """Recursively locate the 'Environment step effective FPS' list anywhere."""
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if k == "Environment step effective FPS" and isinstance(v, list):
+                        return v
+                    r = find_series(v)
+                    if r is not None:
+                        return r
+            elif isinstance(obj, list):
+                for it in obj:
+                    r = find_series(it)
+                    if r is not None:
+                        return r
+            return None
+
+        def sample_fps(path: Path, excluded: set[int]) -> float | None:
+            series = find_series(json.loads(path.read_text()))
+            if not series:
+                return None
+            kept = [float(f) for i, f in enumerate(series)
+                    if i not in excluded and isinstance(f, (int, float)) and not isinstance(f, bool)]
+            return statistics.mean(kept) if len(kept) >= 2 else None
+
         rows = []
         per_task_floor = {}
         for task_dir in sorted(p for p in out_root.glob("*") if p.is_dir()):
+            excl_file = task_dir / "excluded.txt"
+            excluded = expand_excluded(excl_file.read_text().strip() if excl_file.exists() else "0-100")
+            tid_file = task_dir / "task_id.txt"
+            task_id = tid_file.read_text().strip() if tid_file.exists() else task_dir.name
             samples = []
-            for jf in sorted(task_dir.glob("sample_*/legacy_fps_*.json")):
+            for jf in sorted(task_dir.glob("sample_*/benchmark_output.json")):
                 try:
-                    fps = json.loads(jf.read_text()).get("mean_kept_effective_fps")
-                    if isinstance(fps, (int, float)) and fps > 0:
-                        samples.append(float(fps))
+                    v = sample_fps(jf, excluded)
+                    if v and v > 0:
+                        samples.append(v)
                 except Exception:
                     pass
             if not samples:
-                rows.append((task_dir.name, "N/A", 0, "no usable samples"))
+                rows.append((task_id, "N/A", 0, "no usable samples"))
                 continue
             med = statistics.median(samples)
-            task_id = None
-            for jf in task_dir.glob("sample_*/legacy_fps_*.json"):
-                task_id = json.loads(jf.read_text()).get("task_id")
-                break
-            per_task_floor[task_id or task_dir.name] = med
-            rows.append((task_id or task_dir.name, f"{med:.1f}", len(samples),
-                         ", ".join(f"{s:.0f}" for s in samples)))
+            per_task_floor[task_id] = med
+            rows.append((task_id, f"{med:.1f}", len(samples), ", ".join(f"{s:.0f}" for s in samples)))
 
-        lines = ["## Legacy IsaacLab hard-floor collection", "",
+        lines = ["## Legacy IsaacLab hard-floor collection (benchmark_non_rl.py)", "",
+                 "Metric: mean of `Environment step effective FPS` over kept frames "
+                 "(warmup frames dropped), reproducing the oracle's `measured_fps`.", "",
                  "| Task | Median FPS | Samples | Per-sample FPS |", "|---|---:|---:|---|"]
         for task, med, n, detail in rows:
             lines.append(f"| {task} | {med} | {n} | {detail} |")
@@ -253,9 +299,8 @@ jobs:
                   json.dumps({gpu_key: {t: round(v, 1) for t, v in per_task_floor.items()}}, indent=2),
                   "```",
                   "",
-                  "_Copy each task's physx value into that task's `fps_mean_floor` in tasks.json. "
-                  "The legacy release is PhysX-era, so no newton floors are produced. "
-                  "Note: 2.2.0 registers Cartpole as `Isaac-Cartpole-Direct-v0`; the current gate "
+                  "_The legacy release is PhysX-era, so no newton floors are produced. "
+                  "2.2.0 registers Cartpole as `Isaac-Cartpole-Direct-v0`; the current gate "
                   "uses `Isaac-Cartpole-Direct` (no suffix)._"]
         text = "\n".join(lines)
         print(text)
