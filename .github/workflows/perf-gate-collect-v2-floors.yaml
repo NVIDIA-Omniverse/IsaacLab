@@ -43,9 +43,9 @@ on:
   workflow_dispatch:
     inputs:
       image_ref:
-        description: "Pullable, Blackwell-capable legacy IsaacLab image (>= 2.2.0 / Isaac Sim 5.0). Default is the public minimal 2.2.0 container on NGC."
+        description: "Pullable, Blackwell-capable IsaacLab image (>= 2.2.0 / Isaac Sim 5.0). Default is the public minimal 2.3.2 container on NGC (target Isaac Sim 5.1)."
         required: false
-        default: "nvcr.io/nvidia/isaac-lab:2.2.0"
+        default: "nvcr.io/nvidia/isaac-lab:2.3.2"
       cells:
         description: >-
           JSON array of cells to measure. Each: {"task","num_envs","num_frames","excluded","cameras"?}.
@@ -60,7 +60,7 @@ on:
       samples:
         description: "Repetitions per cell (the reported floor is the median of these)."
         required: false
-        default: "10"
+        default: "3"
       seed:
         description: "Environment seed for every run."
         required: false
@@ -96,7 +96,7 @@ jobs:
     - name: Pull legacy IsaacLab image
       env:
         # Fall back to the default when push-triggered (inputs.* is empty on push).
-        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.2.0' }}
+        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.3.2' }}
       run: |
         set -euo pipefail
         if [ -z "${CI_IMAGE_REF}" ]; then
@@ -120,11 +120,38 @@ jobs:
         docker tag "${CI_IMAGE_REF}" "${{ env.LEGACY_IMAGE_TAG }}"
         rm -rf "${DOCKER_CONFIG_DIR}"
 
+    - name: Report container stack (Isaac Sim / Python / torch / warp)
+      run: |
+        set -euo pipefail
+        # Capture the exact versions the image bundles BEFORE benchmarking. This
+        # resolves the ambiguity about what Isaac Sim the isaac-lab:2.3.2 container
+        # ships (5.1 runs on Blackwell; 4.5 does not) and records the stack for the
+        # writeup. Non-fatal: never block the run on this probe.
+        docker run --rm --entrypoint bash "${{ env.LEGACY_IMAGE_TAG }}" -c '
+          set +e
+          echo "===== Isaac Sim VERSION ====="
+          for v in /isaac-sim/VERSION /workspace/isaaclab/_isaac_sim/VERSION; do
+            [ -f "$v" ] && { echo "$v:"; cat "$v"; }
+          done
+          echo "===== python ====="
+          (python --version 2>&1 || true)
+          echo "===== key pip versions ====="
+          (python -m pip freeze 2>/dev/null | grep -iE "^(isaacsim|isaaclab|torch|warp)" || true)
+        ' 2>&1 | tee "${{ github.workspace }}/container_stack.txt" || echo "::warning::stack report failed"
+        {
+          echo "## Container stack (${CI_IMAGE_REF:-image})"
+          echo '```'
+          cat "${{ github.workspace }}/container_stack.txt" 2>/dev/null || true
+          echo '```'
+        } >> "${GITHUB_STEP_SUMMARY}"
+      env:
+        CI_IMAGE_REF: ${{ inputs.image_ref || 'nvcr.io/nvidia/isaac-lab:2.3.2' }}
+
     - name: Run 2.2.0 benchmark_non_rl.py per cell
       env:
         # inputs.* are empty on push-triggered runs; fall back to the dispatch defaults.
         CELLS: ${{ inputs.cells }}
-        SAMPLES: ${{ inputs.samples || '10' }}
+        SAMPLES: ${{ inputs.samples || '3' }}
         SEED: ${{ inputs.seed || '42' }}
       run: |
         set -euo pipefail
