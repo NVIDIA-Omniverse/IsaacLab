@@ -110,6 +110,53 @@ jobs:
         nvidia-smi --query-gpu=name,driver_version,cuda_version,memory.total,compute_cap --format=csv > regression-evidence/host/nvidia-smi-summary.csv 2>&1
         cat /proc/meminfo > regression-evidence/host/meminfo.txt 2>&1
 
+    - name: Prepare Nsight Systems CLI
+      env:
+        COLLECT_NSYS: ${{ inputs.collect_nsys }}
+      run: |
+        set -euo pipefail
+        if [ -z "${COLLECT_NSYS}" ]; then
+          COLLECT_NSYS=true
+        fi
+        if [ "${COLLECT_NSYS}" != "true" ]; then
+          echo "COLLECT_NSYS=${COLLECT_NSYS}; skipping nsys preparation"
+          exit 0
+        fi
+        rm -rf regression-evidence/nsys-cli
+        mkdir -p regression-evidence/nsys-cli
+        case "$(uname -m)" in
+          aarch64) REPO_ARCH=arm64 ;;
+          *) REPO_ARCH=amd64 ;;
+        esac
+        UBU=ubuntu2404
+        if grep -q "20.04" /etc/os-release 2>/dev/null; then UBU=ubuntu2004; fi
+        if grep -q "22.04" /etc/os-release 2>/dev/null; then UBU=ubuntu2204; fi
+        BASE="https://developer.download.nvidia.com/devtools/repos/${UBU}/${REPO_ARCH}"
+        echo "Using devtools repo ${BASE}"
+        curl -fsSL -o /tmp/nsys-packages.gz "${BASE}/Packages.gz"
+        gunzip -c /tmp/nsys-packages.gz > /tmp/nsys-packages.txt
+        DEB_REL="$(grep -E '^Filename: .*NsightSystems-linux-cli-public-.*\.deb$' /tmp/nsys-packages.txt | sed 's/^Filename: //' | sort -V | tail -1)"
+        if [ -z "${DEB_REL}" ]; then
+          echo "::error::Could not find a NsightSystems CLI package in ${BASE}/Packages"
+          exit 1
+        fi
+        echo "Chosen nsys package: ${DEB_REL}"
+        curl -fsSL -o /tmp/nsys.deb "${BASE}/${DEB_REL}"
+        dpkg-deb -x /tmp/nsys.deb regression-evidence/nsys-cli
+        NSYS_BIN="$(find regression-evidence/nsys-cli -type f -path '*/bin/nsys' | head -1)"
+        if [ -z "${NSYS_BIN}" ]; then
+          NSYS_BIN="$(find regression-evidence/nsys-cli -type f -path '*target-linux-x64/nsys' | head -1)"
+        fi
+        if [ -z "${NSYS_BIN}" ]; then
+          echo "::error::nsys binary not found after extracting ${DEB_REL}"
+          exit 1
+        fi
+        chmod -R a+rX regression-evidence/nsys-cli
+        echo "nsys located at ${NSYS_BIN}"
+        # Fail fast on the runner (x86_64) before the ~40 min benchmark matrix.
+        "${NSYS_BIN}" --version
+        echo "HOST_NSYS_REL=${NSYS_BIN#regression-evidence/nsys-cli/}" >> "$GITHUB_ENV"
+
     - name: Run benchmark repeats and nsys traces
       env:
         CELLS: ${{ inputs.cells }}
@@ -205,9 +252,11 @@ jobs:
             -e BENCH_NUM_FRAMES="${num_frames}" -e BENCH_SEED="${SEED}" \
             -e BENCH_EXTRA_ARGS="${extra_args}" -e BENCH_HYDRA_ARGS="${hydra_args}" \
             -e BENCH_PROFILE_NSYS="${profile_env}" \
+            -e HOST_NSYS_REL="${HOST_NSYS_REL:-}" \
             -v "${out_dir}:/tmp/bench_out" \
             -v "${GITHUB_WORKSPACE}/jit-cache:/tmp/jit-cache" \
             -v "${GITHUB_WORKSPACE}/kit-cache:/isaac-sim/kit/cache" \
+            -v "${GITHUB_WORKSPACE}/regression-evidence/nsys-cli:/opt/nsys-cli" \
             "${source_mount[@]}" \
             "${image}" \
             -c '
@@ -235,7 +284,11 @@ jobs:
               CMD+=("${HYDRA_ARGS[@]}")
               if [ "${BENCH_PROFILE_NSYS}" = "true" ]; then
                 NSYS_BIN=""
+                if [ -n "${HOST_NSYS_REL:-}" ] && [ -x "/opt/nsys-cli/${HOST_NSYS_REL}" ]; then
+                  NSYS_BIN="/opt/nsys-cli/${HOST_NSYS_REL}"
+                fi
                 for cand in \
+                  "${NSYS_BIN}" \
                   "$(command -v nsys 2>/dev/null || true)" \
                   /opt/nvidia/nsight-systems/*/bin/nsys \
                   /opt/nvidia/nsight-systems/*/target-linux-x64/nsys \
@@ -267,11 +320,14 @@ jobs:
                     if dl "${BASE}/Packages.gz" /tmp/nsys-packages.gz && gunzip -c /tmp/nsys-packages.gz > /tmp/nsys-packages.txt 2>/dev/null; then :; else
                       dl "${BASE}/Packages" /tmp/nsys-packages.txt || true
                     fi
-                    DEB_REL="$(grep -E "^Filename: .*nsight-systems-cli.*_${REPO_ARCH}\.deb" /tmp/nsys-packages.txt 2>/dev/null | sed "s/^Filename: //" | sort -V | tail -1 || true)"
+                    DEB_REL="$(grep -E "^Filename: .*NsightSystems-linux-cli-public-.*\.deb$" /tmp/nsys-packages.txt 2>/dev/null | sed "s/^Filename: //" | sort -V | tail -1 || true)"
                     if [ -n "$DEB_REL" ] && dl "${BASE}/${DEB_REL}" /tmp/nsys.deb && [ -s /tmp/nsys.deb ]; then
                       mkdir -p /tmp/nsys-cli
                       dpkg-deb -x /tmp/nsys.deb /tmp/nsys-cli || true
-                      NSYS_BIN="$(find /tmp/nsys-cli -type f -name nsys 2>/dev/null | head -1 || true)"
+                      NSYS_BIN="$(find /tmp/nsys-cli -type f -path "*/bin/nsys" 2>/dev/null | head -1 || true)"
+                      if [ -z "$NSYS_BIN" ]; then
+                        NSYS_BIN="$(find /tmp/nsys-cli -type f -name nsys 2>/dev/null | head -1 || true)"
+                      fi
                       [ -n "$NSYS_BIN" ] && chmod +x "$NSYS_BIN" 2>/dev/null || true
                     else
                       echo "could not resolve/download nsight-systems-cli deb from ${BASE}"
