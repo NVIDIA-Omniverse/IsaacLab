@@ -234,20 +234,76 @@ jobs:
               CMD+=("${EXTRA_ARGS[@]}")
               CMD+=("${HYDRA_ARGS[@]}")
               if [ "${BENCH_PROFILE_NSYS}" = "true" ]; then
-                NSYS_BIN="$(command -v nsys || true)"
+                NSYS_BIN=""
+                for cand in \
+                  "$(command -v nsys 2>/dev/null || true)" \
+                  /opt/nvidia/nsight-systems/*/bin/nsys \
+                  /opt/nvidia/nsight-systems/*/target-linux-x64/nsys \
+                  /opt/nvidia/nsight-systems/*/host-linux-x64/nsys \
+                  /opt/nvidia/nsight-systems-cli/*/bin/nsys \
+                  /opt/nvidia/nsight-systems-cli/*/target-linux-x64/nsys \
+                  /opt/nvidia/nsight_systems/*/bin/nsys \
+                  /usr/local/cuda*/bin/nsys \
+                  /usr/local/bin/nsys; do
+                  if [ -n "$cand" ] && [ -x "$cand" ]; then NSYS_BIN="$cand"; break; fi
+                done
                 if [ -z "$NSYS_BIN" ]; then
-                  NSYS_BIN="$(ls /opt/nvidia/nsight-systems/*/bin/nsys 2>/dev/null | head -1 || true)"
+                  NSYS_BIN="$(find /opt /usr/local /isaac-sim -maxdepth 8 -type f -name nsys 2>/dev/null | head -1 || true)"
                 fi
-                if [ -n "$NSYS_BIN" ]; then
+                if [ -z "$NSYS_BIN" ]; then
+                  echo "nsys not present in image; attempting rootless install from NVIDIA devtools repo"
+                  case "$(uname -m)" in
+                    aarch64) REPO_ARCH=arm64 ;;
+                    *) REPO_ARCH=amd64 ;;
+                  esac
+                  UBU=ubuntu2204
+                  if grep -q "20.04" /etc/os-release 2>/dev/null; then UBU=ubuntu2004; fi
+                  if grep -q "24.04" /etc/os-release 2>/dev/null; then UBU=ubuntu2404; fi
+                  BASE="https://developer.download.nvidia.com/devtools/repos/${UBU}/${REPO_ARCH}"
+                  FETCH=""
+                  if command -v curl >/dev/null 2>&1; then FETCH=curl; elif command -v wget >/dev/null 2>&1; then FETCH=wget; fi
+                  if [ -n "$FETCH" ] && command -v dpkg-deb >/dev/null 2>&1; then
+                    dl() { if [ "$FETCH" = curl ]; then curl -fsSL -o "$2" "$1"; else wget -qO "$2" "$1"; fi; }
+                    if dl "${BASE}/Packages.gz" /tmp/nsys-packages.gz && gunzip -c /tmp/nsys-packages.gz > /tmp/nsys-packages.txt 2>/dev/null; then :; else
+                      dl "${BASE}/Packages" /tmp/nsys-packages.txt || true
+                    fi
+                    DEB_REL="$(grep -E "^Filename: .*nsight-systems-cli.*_${REPO_ARCH}\.deb" /tmp/nsys-packages.txt 2>/dev/null | sed "s/^Filename: //" | sort -V | tail -1 || true)"
+                    if [ -n "$DEB_REL" ] && dl "${BASE}/${DEB_REL}" /tmp/nsys.deb && [ -s /tmp/nsys.deb ]; then
+                      mkdir -p /tmp/nsys-cli
+                      dpkg-deb -x /tmp/nsys.deb /tmp/nsys-cli || true
+                      NSYS_BIN="$(find /tmp/nsys-cli -type f -name nsys 2>/dev/null | head -1 || true)"
+                      [ -n "$NSYS_BIN" ] && chmod +x "$NSYS_BIN" 2>/dev/null || true
+                    else
+                      echo "could not resolve/download nsight-systems-cli deb from ${BASE}"
+                    fi
+                  else
+                    echo "no curl/wget or dpkg-deb available for rootless nsys install"
+                  fi
+                fi
+                if [ -n "$NSYS_BIN" ] && [ -x "$NSYS_BIN" ]; then
+                  echo "using nsys at $NSYS_BIN"
+                  "$NSYS_BIN" --version 2>&1 | head -1 || true
+                  NSYS_OK=1
                   "$NSYS_BIN" profile -t cuda,nvtx,osrt,cudnn,cublas \
                     --sample=cpu --python-sampling=true \
-                    --force-overwrite true -o /tmp/bench_out/nsys_trace "${CMD[@]}"
-                  for report in cuda_gpu_kern_sum osrt_sum cuda_api_sum; do
-                    "$NSYS_BIN" stats --report "$report" --format csv \
-                      --output "/tmp/bench_out/nsys_${report}" /tmp/bench_out/nsys_trace.nsys-rep || true
-                  done
+                    --force-overwrite true -o /tmp/bench_out/nsys_trace "${CMD[@]}" || NSYS_OK=0
+                  if [ "$NSYS_OK" = "0" ] || [ ! -f /tmp/bench_out/nsys_trace.nsys-rep ]; then
+                    echo "nsys profiling failed; retrying with reduced options" | tee /tmp/bench_out/nsys_retry.txt
+                    NSYS_OK=1
+                    "$NSYS_BIN" profile -t cuda,nvtx,osrt \
+                      --force-overwrite true -o /tmp/bench_out/nsys_trace "${CMD[@]}" || NSYS_OK=0
+                  fi
+                  if [ -f /tmp/bench_out/nsys_trace.nsys-rep ]; then
+                    for report in cuda_gpu_kern_sum osrt_sum cuda_api_sum; do
+                      "$NSYS_BIN" stats --report "$report" --format csv \
+                        --output "/tmp/bench_out/nsys_${report}" /tmp/bench_out/nsys_trace.nsys-rep || true
+                    done
+                  else
+                    echo "nsys produced no report; running unprofiled to still collect FPS" | tee /tmp/bench_out/nsys_norep.txt
+                    "${CMD[@]}"
+                  fi
                 else
-                  echo "nsys not found in image" | tee /tmp/bench_out/nsys_missing.txt
+                  echo "nsys not found and rootless install failed" | tee /tmp/bench_out/nsys_missing.txt
                   "${CMD[@]}"
                 fi
               else
