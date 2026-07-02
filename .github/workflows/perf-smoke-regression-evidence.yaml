@@ -134,7 +134,7 @@ jobs:
         chmod -R 0777 regression-evidence jit-cache kit-cache
 
         safe_component() {
-          echo "$1" | tr -c 'a-zA-Z0-9._-' '-'
+          printf '%s' "$1" | tr -c 'a-zA-Z0-9._-' '-'
         }
 
         monitor_container() {
@@ -283,7 +283,7 @@ jobs:
           local label="$1"
           local image="$2"
           local mount_source="$3"
-          local label_dir="regression-evidence/${label}"
+          local label_dir="${GITHUB_WORKSPACE}/regression-evidence/${label}"
           mkdir -p "${label_dir}"
           echo "${CELLS}" | jq -c ".[]" | while read -r cell; do
             local name task num_envs num_frames excluded extra_args hydra_args
