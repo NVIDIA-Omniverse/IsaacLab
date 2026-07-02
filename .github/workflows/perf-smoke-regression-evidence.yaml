@@ -119,6 +119,17 @@ jobs:
         SEED: ${{ inputs.seed || '42' }}
       run: |
         set -euo pipefail
+        if [ -z "${CELLS}" ]; then
+          CELLS='[
+            {"name":"cartpole","legacy_task":"Isaac-Cartpole-Direct-v0","current_task":"Isaac-Cartpole-Direct","num_envs":4096,"num_frames":300,"excluded":"0-100"},
+            {"name":"factory","legacy_task":"Isaac-Factory-GearMesh-Direct-v0","current_task":"Isaac-Factory-GearMesh-Direct-v0","num_envs":512,"num_frames":300,"excluded":"0-100"},
+            {"name":"g1","legacy_task":"Isaac-Velocity-Flat-G1-v0","current_task":"Isaac-Velocity-Flat-G1-v0","num_envs":512,"num_frames":300,"excluded":"0-100"},
+            {"name":"shadow_vision","legacy_task":"Isaac-Repose-Cube-Shadow-Vision-Benchmark-Direct-v0","current_task":"Isaac-Repose-Cube-Shadow-Vision-Benchmark-Direct-v0","num_envs":16,"num_frames":150,"excluded":"0-50","extra_args":["--enable_cameras"]}
+          ]'
+        fi
+        if [ -z "${COLLECT_NSYS}" ]; then
+          COLLECT_NSYS=true
+        fi
         mkdir -p regression-evidence jit-cache/warp jit-cache/nv kit-cache
         chmod -R 0777 regression-evidence jit-cache kit-cache
 
