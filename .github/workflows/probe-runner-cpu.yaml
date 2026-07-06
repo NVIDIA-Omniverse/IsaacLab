@@ -23,4 +23,11 @@ jobs:
           SOCK=$(lscpu | grep -m1 'Socket(s)' | sed 's/.*: *//')
           TPC=$(lscpu | grep -m1 'Thread(s) per core' | sed 's/.*: *//')
           GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
-          echo "PROBE_CPU cell=${{ matrix.n }} host=$(hostname) vendor=${VENDOR} model=[${MODEL}] ncpu=${NCPU} sockets=${SOCK} tpc=${TPC} gpu=[${GPU}]"
+          MAXMHZ=$(lscpu | grep -m1 'CPU max MHz' | sed 's/.*: *//')
+          echo "PROBE_CPU cell=${{ matrix.n }} host=$(hostname) vendor=${VENDOR} model=[${MODEL}] ncpu=${NCPU} sockets=${SOCK} tpc=${TPC} maxmhz=${MAXMHZ} gpu=[${GPU}]"
+          # single-thread CPU microbench (pure python, no deps, single line) — lower sec = stronger single-thread
+          if command -v python3 >/dev/null 2>&1; then
+            python3 -c "import time; t=time.perf_counter(); x=sum(((i*i)%7)**0.5 for i in range(30000000)); print('PROBE_STBENCH sec=%.3f'%(time.perf_counter()-t))"
+          else
+            echo "PROBE_STBENCH sec=NA"
+          fi
