@@ -1,0 +1,26 @@
+name: Probe Runner CPU
+# Investigation-only (OMPE-99231): fan out across the RTX PRO 6000 fleet to sample the
+# CPU distribution empirically. No Isaac Sim, no image pull — each cell exits in seconds.
+on:
+  push:
+    branches: ['angehu/test/**']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ${{ fromJSON(vars.PERF_SMOKE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    strategy:
+      fail-fast: false
+      max-parallel: 30
+      matrix:
+        n: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]
+    steps:
+      - name: Probe CPU/GPU
+        run: |
+          MODEL=$(lscpu | grep -m1 'Model name' | sed 's/.*: *//')
+          VENDOR=$(lscpu | grep -m1 'Vendor ID' | sed 's/.*: *//')
+          NCPU=$(nproc)
+          SOCK=$(lscpu | grep -m1 'Socket(s)' | sed 's/.*: *//')
+          TPC=$(lscpu | grep -m1 'Thread(s) per core' | sed 's/.*: *//')
+          GPU=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+          echo "PROBE_CPU cell=${{ matrix.n }} host=$(hostname) vendor=${VENDOR} model=[${MODEL}] ncpu=${NCPU} sockets=${SOCK} tpc=${TPC} gpu=[${GPU}]"
