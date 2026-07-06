@@ -1,0 +1,81 @@
+name: Compare 2.3.1 vs 3.0 Same Runner
+# OMPE-99231: controlled 3.0-fork-vs-2.3.1 on the SAME 6000 runner (same physical CPU),
+# fanned out across the heterogeneous fleet so we get MULTIPLE same-runner deltas per CPU SKU.
+# Each cell runs BOTH versions' Cartpole@4096, N interleaved repeats, dumps its CPU, uploads raw JSONs.
+#   3.0 fork  = internal perf image (unified-POC), task Isaac-Cartpole-Direct, backend json
+#   2.3.1     = public nvcr.io/nvidia/isaac-lab:2.3.1, task Isaac-Cartpole-Direct-v0, backend JSONFileMetrics
+on:
+  push:
+    branches: ['angehu/test/**']
+  workflow_dispatch:
+    inputs:
+      repeats: { description: "repeats per version per cell", default: "3", required: false }
+      num_envs: { description: "num_envs", default: "4096", required: false }
+      num_frames: { description: "num_frames", default: "300", required: false }
+env:
+  NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+  FORK_IMG: ${{ vars.PERF_SMOKE_CI_IMAGE || 'nvcr.io/nvidian/isaac-lab:latest-perf' }}
+  IMG_231: nvcr.io/nvidia/isaac-lab:2.3.1
+jobs:
+  compare:
+    runs-on: ${{ fromJSON(vars.PERF_SMOKE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        n: [1,2,3,4,5,6,7,8,9,10,11,12]
+    steps:
+      - name: Same-runner 2.3.1 vs 3.0
+        run: |
+          set -uo pipefail
+          R="${{ github.event.inputs.repeats || '3' }}"
+          NENV="${{ github.event.inputs.num_envs || '4096' }}"
+          NF="${{ github.event.inputs.num_frames || '300' }}"
+          OUT="$PWD/out"; mkdir -p "$OUT"; chmod 0777 "$OUT"
+          # provenance for grouping
+          { echo "cell=${{ matrix.n }} host=$(hostname)"
+            echo "cpu_model=$(lscpu | grep -m1 'Model name' | sed 's/.*: *//')"
+            echo "cpu_vendor=$(lscpu | grep -m1 'Vendor ID' | sed 's/.*: *//')"
+            echo "ncpu=$(nproc)  tpc=$(lscpu | grep -m1 'Thread(s) per core' | sed 's/.*: *//')"
+            echo "gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
+          } | tee "$OUT/cpu.txt"
+          # docker login (credsStore fix from ecr-build-push-pull)
+          DCFG="$(mktemp -d)"; echo '{"credsStore":""}' > "$DCFG/config.json"; export DOCKER_CONFIG="$DCFG"
+          [ -n "${NGC_API_KEY:-}" ] && echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin || true
+          docker pull "$FORK_IMG" 2>&1 | tail -2
+          docker pull "$IMG_231" 2>&1 | tail -2
+          COMMON="--gpus all --network=host -e OMNI_KIT_ACCEPT_EULA=yes -e ACCEPT_EULA=Y -e ISAAC_SIM_HEADLESS=1 -e PYTHONUNBUFFERED=1 -e WARP_CACHE_PATH=/tmp/wp -e CUDA_CACHE_PATH=/tmp/nv -v ${OUT}:/out"
+          # persistent containers (so repeats reuse warm caches + any torch fix)
+          docker run -d --name c30  --entrypoint bash $COMMON "$FORK_IMG" -c "sleep 5400"
+          docker run -d --name c231 --entrypoint bash $COMMON "$IMG_231" -c "sleep 5400"
+          for c in c30 c231; do docker exec $c bash -lc "cd /workspace/isaaclab && rm -f _isaac_sim && ln -s /isaac-sim _isaac_sim" || true; done
+          # torch Blackwell guard for 2.3.1: 1-frame smoke; if no sm_120 kernel, run isaaclab.sh -i (ensure_cuda_torch=cu128)
+          docker exec c231 bash -lc "cd /workspace/isaaclab && ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py --task Isaac-Cartpole-Direct-v0 --num_envs 64 --num_frames 5 --benchmark_backend JSONFileMetrics --seed 42 --headless" > "$OUT/231_smoke.log" 2>&1 || true
+          if grep -qi "no kernel image" "$OUT/231_smoke.log"; then
+            echo "::warning::2.3.1 torch not Blackwell-capable; running isaaclab.sh -i to install cu128"
+            docker exec c231 bash -lc "cd /workspace/isaaclab && ./isaaclab.sh -i" > "$OUT/231_install.log" 2>&1 || true
+          fi
+          run_bench () { # $1=container $2=taskid $3=backend $4=tag $5=r
+            docker exec "$1" bash -lc "cd /workspace/isaaclab && rm -f /out/benchmark_non_rl_*.json /tmp/metrics_benchmark_non_rl.json 2>/dev/null; \
+              ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py --task '$2' --num_envs ${NENV} --num_frames ${NF} \
+              --benchmark_backend $3 --seed 42 --headless $([ '$3' = json ] && echo --output_path /out); \
+              [ '$3' = JSONFileMetrics ] && cp /tmp/metrics_benchmark_non_rl.json /out/$4_run_$5.json; \
+              [ '$3' = json ] && mv /out/benchmark_non_rl_*.json /out/$4_run_$5.json 2>/dev/null; true" \
+              > "$OUT/$4_run_$5.log" 2>&1
+            echo "  $4 run=$5 -> $(ls -1 "$OUT/$4_run_$5.json" 2>/dev/null | wc -l) json"
+          }
+          for r in $(seq 1 "$R"); do
+            echo "==== cell ${{ matrix.n }} repeat $r/$R ===="
+            run_bench c30  Isaac-Cartpole-Direct     json            fork  "$r"
+            run_bench c231 Isaac-Cartpole-Direct-v0  JSONFileMetrics lab231 "$r"
+          done
+          docker rm -f c30 c231 2>/dev/null || true
+          echo "COMPARE_CELL_DONE cell=${{ matrix.n }}"
+      - name: Upload cell artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compare-cell-${{ matrix.n }}
+          path: out/
+          if-no-files-found: warn
