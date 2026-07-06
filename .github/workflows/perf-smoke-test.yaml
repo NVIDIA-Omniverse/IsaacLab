@@ -39,7 +39,7 @@ on:
   # onto a `pull-request/<N>` branch, whose `push` IS allowed on the fleet. Trigger on
   # that push (plus protected branches for baseline updates) and manual dispatch only.
   push:
-    branches: [main, develop, 'release/**', angehu/perf-smoke-poc, 'pull-request/[0-9]+']
+    branches: [main, develop, 'release/**', angehu/perf-smoke-poc, 'pull-request/[0-9]+', 'angehu/test/**']
   workflow_dispatch:
 
 concurrency:
@@ -268,6 +268,21 @@ jobs:
         # World-writable bind mounts fix all of these, independent of runner uid.
         chmod -R 0777 "${ARTIFACT_DIR}" "${{ github.workspace }}/jit-cache" "${{ github.workspace }}/kit-cache"
 
+        # [angehu/test perf-investigation | OMPE-99231 Goal B] One-shot runner provenance,
+        # captured on the SAME machine that runs this bench cell. Diagnostic only; lands in
+        # the uploaded artifact dir. Never affects the verdict.
+        {
+          echo "=== date_utc ==="; date -u
+          echo "=== runner ==="; echo "host=$(hostname) RUNNER_NAME=${RUNNER_NAME:-?} RUNNER_OS=${RUNNER_OS:-?}"
+          echo "=== nproc ==="; nproc
+          echo "=== cgroup cpu limits ==="; cat /sys/fs/cgroup/cpu.max 2>/dev/null; cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null; cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null
+          echo "=== lscpu ==="; lscpu
+          echo "=== meminfo(head) ==="; head -5 /proc/meminfo
+          echo "=== nvidia-smi -q ==="; nvidia-smi -q
+          echo "=== nvidia-smi topo ==="; nvidia-smi topo -m 2>/dev/null
+          echo "=== docker version ==="; docker version 2>/dev/null | head -20
+        } > "${ARTIFACT_DIR}/runner_provenance.txt" 2>&1 || true
+
         GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
         if [[ -z "${GPU_MODEL}" ]]; then
           GPU_MODEL="unknown-gpu"
@@ -334,6 +349,15 @@ jobs:
           "
 
         START=$(date +%s)
+
+        # [angehu/test perf-investigation | OMPE-99231 Goal B] Host-side GPU telemetry sampler
+        # during the bench: clocks / thermal / power / util / active throttle reasons every
+        # 500ms into the uploaded artifact dir, to detect under-load throttling or clock caps
+        # on the 6000 runner. Bounded by the bench timeout; terminated at step end. Diagnostic
+        # only (never affects the verdict).
+        timeout ${{ matrix.bench_timeout_s }} nvidia-smi \
+          --query-gpu=timestamp,index,name,pstate,clocks.sm,clocks.mem,clocks.gr,temperature.gpu,power.draw,power.limit,utilization.gpu,utilization.memory,memory.used,clocks_throttle_reasons.active \
+          --format=csv -lms 500 > "${ARTIFACT_DIR}/gpu_telemetry.csv" 2>/dev/null &
 
         # Stream container logs to file and terminal while benchmark runs
         docker logs -f "${CONTAINER_NAME}" 2>&1 | tee "${LOG_FILE}" &
