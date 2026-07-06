@@ -1,0 +1,27 @@
+name: Recon 2.3.1 Container
+# OMPE-99231 recon: learn the public isaac-lab:2.3.1 container layout + whether its torch
+# runs on Blackwell (sm_120) on the 6000 runner, before building the same-runner 2-vs-3 job.
+on:
+  push:
+    branches: ['angehu/test/**']
+  workflow_dispatch:
+env:
+  NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+jobs:
+  recon:
+    runs-on: ${{ fromJSON(vars.PERF_SMOKE_RUNS_ON || '["linux-amd64-gpu-rtxpro6000-latest-1"]') }}
+    timeout-minutes: 30
+    steps:
+      - name: Recon 2.3.1 container
+        run: |
+          set -x
+          echo "RUNNER_CPU=$(lscpu | grep -m1 'Model name' | sed 's/.*: *//')"
+          DCFG="$(mktemp -d)"; echo '{"credsStore":""}' > "$DCFG/config.json"; export DOCKER_CONFIG="$DCFG"
+          if [ -n "${NGC_API_KEY:-}" ]; then echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin; fi
+          IMG=nvcr.io/nvidia/isaac-lab:2.3.1
+          docker pull "$IMG" 2>&1 | tail -3
+          echo "===== layout ====="
+          docker run --rm --entrypoint bash "$IMG" -c "echo PWD=\$(pwd); echo '--- isaaclab.sh ---'; find / -maxdepth 6 -name isaaclab.sh 2>/dev/null; echo '--- benchmark_non_rl.py ---'; find / -maxdepth 7 -name benchmark_non_rl.py 2>/dev/null; echo '--- VERSION files ---'; find / -maxdepth 5 -name VERSION 2>/dev/null | head" 2>&1 | grep -vE "^\+" | tail -25
+          echo "===== torch arch on this GPU (Blackwell sm_120?) ====="
+          docker run --rm --gpus all --entrypoint bash "$IMG" -c "python -c 'import torch;print(\"TORCH\",torch.__version__,torch.version.cuda,torch.cuda.get_arch_list())' 2>&1 | tail -3"
+          echo "RECON_231_DONE"
