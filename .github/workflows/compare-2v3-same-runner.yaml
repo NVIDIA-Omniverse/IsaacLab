@@ -57,12 +57,17 @@ jobs:
             docker exec c231 bash -lc "cd /workspace/isaaclab && ./isaaclab.sh -i" > "$OUT/231_install.log" 2>&1 || true
           fi
           run_bench () { # $1=container $2=taskid $3=backend $4=tag $5=r
-            docker exec "$1" bash -lc "cd /workspace/isaaclab && rm -f /out/benchmark_non_rl_*.json /tmp/metrics_benchmark_non_rl.json 2>/dev/null; \
+            local extra=""; [ "$3" = "json" ] && extra="--output_path /out"
+            docker exec "$1" bash -lc "cd /workspace/isaaclab && rm -f /out/benchmark_non_rl_*.json /workspace/isaaclab/benchmark_non_rl_*.json /tmp/metrics_benchmark_non_rl.json 2>/dev/null; \
               ./isaaclab.sh -p scripts/benchmarks/benchmark_non_rl.py --task '$2' --num_envs ${NENV} --num_frames ${NF} \
-              --benchmark_backend $3 --seed 42 --headless $([ '$3' = json ] && echo --output_path /out); \
-              [ '$3' = JSONFileMetrics ] && cp /tmp/metrics_benchmark_non_rl.json /out/$4_run_$5.json; \
-              [ '$3' = json ] && mv /out/benchmark_non_rl_*.json /out/$4_run_$5.json 2>/dev/null; true" \
-              > "$OUT/$4_run_$5.log" 2>&1
+              --benchmark_backend $3 --seed 42 --headless ${extra}" > "$OUT/$4_run_$5.log" 2>&1
+            if [ "$3" = "json" ]; then
+              # 3.0 json backend: written to /out (--output_path) or cwd fallback
+              docker exec "$1" bash -lc "mv /out/benchmark_non_rl_*.json /out/$4_run_$5.json 2>/dev/null || cp /workspace/isaaclab/benchmark_non_rl_*.json /out/$4_run_$5.json 2>/dev/null; true"
+            else
+              # 2.x JSONFileMetrics: fixed /tmp path
+              docker exec "$1" bash -lc "cp /tmp/metrics_benchmark_non_rl.json /out/$4_run_$5.json 2>/dev/null; true"
+            fi
             echo "  $4 run=$5 -> $(ls -1 "$OUT/$4_run_$5.json" 2>/dev/null | wc -l) json"
           }
           for r in $(seq 1 "$R"); do
