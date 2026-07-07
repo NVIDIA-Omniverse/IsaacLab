@@ -121,7 +121,7 @@ def _evaluate(tmp_path: Path, baselines_dir: Path, *, fps: float, bench_result: 
     return compare(
         bench_result=bench_result,
         baseline=baseline,
-        fps_mean_floor=0.0,
+        fps_mean_thresholds=[],
         excluded_frames=frozenset(),
         artifact_dir=artifact_dir,
     )
@@ -140,14 +140,14 @@ def test_noise_floor_widens_rolling_threshold_for_jittery_cells(tmp_path: Path) 
     without_floor = compare(
         bench_result=bench_result,
         baseline=baseline,
-        fps_mean_floor=0.0,
+        fps_mean_thresholds=[],
         excluded_frames=frozenset(),
         artifact_dir=artifact_dir,
     )
     with_floor = compare(
         bench_result=bench_result,
         baseline=baseline,
-        fps_mean_floor=0.0,
+        fps_mean_thresholds=[],
         excluded_frames=frozenset(),
         artifact_dir=artifact_dir,
         noise_floor_pct=2.52,
@@ -305,7 +305,7 @@ def test_missing_perf_info_is_hard_failure(tmp_path: Path) -> None:
     result = compare(
         bench_result=_bench_result(info_present=False),
         baseline=None,
-        fps_mean_floor=0.0,
+        fps_mean_thresholds=[],
         excluded_frames=frozenset(),
         artifact_dir=tmp_path,
     )
