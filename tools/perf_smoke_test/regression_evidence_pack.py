@@ -197,6 +197,27 @@ def _docker_stats_memory(stats_path: Path) -> dict[str, float]:
     return out
 
 
+def _nvidia_smi_memory(samples_path: Path) -> dict[str, float]:
+    values: list[float] = []
+    if not samples_path.exists():
+        return {}
+    for line in samples_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip() or line.startswith("timestamp"):
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 6:
+            continue
+        used = _parse_memory_token(parts[4])
+        if used is not None and used > 0:
+            values.append(used)
+    if not values:
+        return {}
+    return {
+        "gpu_mem_mean_mb": statistics.mean(values),
+        "gpu_mem_peak_mb": max(values),
+    }
+
+
 def _load_json_from_text(text: str) -> Any | None:
     try:
         return json.loads(text)
@@ -261,6 +282,24 @@ def _read_task_id_near(path: Path) -> str | None:
     return None
 
 
+def _run_log_number(path: Path, field: str) -> int | None:
+    run_log = path.parent / "run.log"
+    if not run_log.exists():
+        return None
+    names = [field, field.replace("_", " ")]
+    if field == "num_envs":
+        names.extend(["Number of environments", "num envs"])
+    elif field == "num_frames":
+        names.append("num frames")
+    patterns = [re.compile(rf"^\s*{re.escape(name)}\s*:\s*([0-9]+)\s*$", re.IGNORECASE) for name in names]
+    for line in run_log.read_text(encoding="utf-8", errors="replace").splitlines():
+        for pattern in patterns:
+            match = pattern.match(line)
+            if match:
+                return int(match.group(1))
+    return None
+
+
 def _sample_id(path: Path) -> str:
     for parent in (path.parent, *path.parents):
         if parent.name.startswith(("sample_", "run_")):
@@ -319,6 +358,7 @@ def _sample_from_file(label: str, path: Path) -> dict[str, Any] | None:
     memory_diag = result.get("memory_diag") if result else {}
     runtime_memory = _runtime_memory(phases) if phases else {}
     docker_memory = _docker_stats_memory(path.parent / "docker_stats.jsonl")
+    nvidia_memory = _nvidia_smi_memory(path.parent / "nvidia_smi_samples.csv")
 
     backend = (
         result.get("backend_key")
@@ -337,7 +377,11 @@ def _sample_from_file(label: str, path: Path) -> dict[str, Any] | None:
         or path.parent.parent.name
     )
 
-    gpu_mem_used_mb = (gpu_diag or {}).get("gpu_mem_used_mb") or runtime_memory.get("gpu_mem_used_mb")
+    gpu_mem_used_mb = (
+        (gpu_diag or {}).get("gpu_mem_used_mb")
+        or runtime_memory.get("gpu_mem_used_mb")
+        or nvidia_memory.get("gpu_mem_peak_mb")
+    )
     system_ram_used_mb = (
         (memory_diag or {}).get("system_ram_used_mb")
         or runtime_memory.get("system_ram_used_mb")
@@ -361,11 +405,20 @@ def _sample_from_file(label: str, path: Path) -> dict[str, Any] | None:
         "within_run_std_fps": within_run_std_fps,
         "raw_fps_mean": raw_fps_mean,
         "raw_fps_std": raw_fps_std,
-        "num_envs": launch_config.get("num_envs") or snapshot.get("num_envs") or benchmark_info.get("num_envs"),
-        "num_frames": launch_config.get("num_frames") or snapshot.get("num_frames") or benchmark_info.get("num_frames"),
+        "num_envs": launch_config.get("num_envs")
+        or snapshot.get("num_envs")
+        or benchmark_info.get("num_envs")
+        or _run_log_number(path, "num_envs"),
+        "num_frames": launch_config.get("num_frames")
+        or snapshot.get("num_frames")
+        or benchmark_info.get("num_frames")
+        or _run_log_number(path, "num_frames"),
         "excluded_frames": sorted(excluded),
         "gpu_mem_used_mb": gpu_mem_used_mb,
+        "gpu_mem_mean_mb": nvidia_memory.get("gpu_mem_mean_mb"),
+        "gpu_mem_peak_mb": nvidia_memory.get("gpu_mem_peak_mb") or gpu_mem_used_mb,
         "system_ram_used_mb": system_ram_used_mb,
+        "system_ram_mean_mb": docker_memory.get("system_ram_mean_mb") or system_ram_used_mb,
         "system_ram_peak_mb": docker_memory.get("system_ram_peak_mb"),
         "docker_cpu_mean_pct": docker_memory.get("docker_cpu_mean_pct"),
         "docker_cpu_peak_pct": docker_memory.get("docker_cpu_peak_pct"),
@@ -424,7 +477,12 @@ def _aggregate(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "max_fps": max(float(v) for v in fps_values if v is not None),
                 "mean_within_run_std_fps": _mean([sample.get("within_run_std_fps") for sample in group]),
                 "mean_gpu_mem_used_mb": _mean([sample.get("gpu_mem_used_mb") for sample in group]),
-                "mean_system_ram_used_mb": _mean([sample.get("system_ram_used_mb") for sample in group]),
+                "mean_gpu_mem_mean_mb": _mean([sample.get("gpu_mem_mean_mb") for sample in group]),
+                "peak_gpu_mem_used_mb": max(
+                    [float(v) for v in [sample.get("gpu_mem_peak_mb") for sample in group] if v is not None],
+                    default=None,
+                ),
+                "mean_system_ram_used_mb": _mean([sample.get("system_ram_mean_mb") for sample in group]),
                 "peak_system_ram_used_mb": max(
                     [float(v) for v in [sample.get("system_ram_peak_mb") for sample in group] if v is not None],
                     default=None,
@@ -475,8 +533,8 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]], inputs: list[Artifac
         "## Summary",
         "",
         "| Label | Task | Backend | Env count | Samples | Mean FPS | Median FPS | Run-to-run std | "
-        "Avg within-run std | GPU mem MB | System RAM MB | Peak system RAM MB | CPU | GPU |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "Avg within-run std | Mean VRAM MB | Peak VRAM MB | Mean system RAM MB | Peak system RAM MB | CPU | GPU |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for row in rows:
         cpu = row.get("cpu_name") or "N/A"
@@ -496,7 +554,8 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]], inputs: list[Artifac
                     _fmt(row.get("median_fps")),
                     _fmt(row.get("run_to_run_std_fps")),
                     _fmt(row.get("mean_within_run_std_fps")),
-                    _fmt(row.get("mean_gpu_mem_used_mb")),
+                    _fmt(row.get("mean_gpu_mem_mean_mb")),
+                    _fmt(row.get("peak_gpu_mem_used_mb")),
                     _fmt(row.get("mean_system_ram_used_mb")),
                     _fmt(row.get("peak_system_ram_used_mb")),
                     cpu,
@@ -512,8 +571,10 @@ def _write_markdown(path: Path, rows: list[dict[str, Any]], inputs: list[Artifac
         "- `Run-to-run std` is computed across repeated benchmark samples for the same label/task/backend.",
         "- `Avg within-run std` is computed from per-frame steady-state FPS inside each sample, then averaged "
         "across samples.",
-        "- `System RAM MB` is populated from benchmark runtime memory measurements when present, otherwise from "
-        "`docker stats` samples emitted by the evidence workflow.",
+        "- `Mean VRAM MB` and `Peak VRAM MB` are populated from `nvidia-smi` samples when available. If an "
+        "artifact only reports benchmark-level GPU memory, that value is used as peak VRAM.",
+        "- `Mean system RAM MB` and `Peak system RAM MB` are populated from `docker stats` samples emitted by "
+        "the evidence workflow.",
         "- Nsight Systems traces are uploaded separately as workflow artifacts and should be copied to Google "
         "Drive manually.",
     ]

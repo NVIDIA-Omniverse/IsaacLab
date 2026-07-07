@@ -41,6 +41,9 @@ TASK_ALIASES = {
     "Isaac-Factory-GearMesh-Direct-v0": "Isaac-Factory-GearMesh-Direct",
     "Isaac-Velocity-Flat-G1-v0": "Isaac-Velocity-Flat-G1",
 }
+MISSING_STATUS = {
+    ("Isaac-Repose-Cube-Shadow-Vision-Benchmark-Direct-v0", "isaaclab_2_3_2"): "Segfault during\nrendering startup",
+}
 
 # Fallback median effective FPS (mean of "Environment step effective FPS", frames
 # 101-299) from the initial RTX PRO 6000 Blackwell comparison.
@@ -139,6 +142,10 @@ def _task_label(task_id: str) -> str:
 
 def _canonical_task_id(task_id: str) -> str:
     return TASK_ALIASES.get(task_id, task_id)
+
+
+def _missing_status(task_id: str, label: str) -> str | None:
+    return MISSING_STATUS.get((task_id, label))
 
 
 def _load_rows() -> tuple[list[dict], bool]:
@@ -258,7 +265,19 @@ def main() -> None:
         current_row = by_task_label.get((task_id, "current_fork"), {})
         cur = current_row.get("median_fps") or current_row.get("mean_fps")
         for i, (bar, v, row) in enumerate(zip(bars, fps_values, task_rows)):
+            status = _missing_status(task_id, labels[i])
             if v <= 0:
+                if status:
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        max(fps_values or [1.0]) * 0.08,
+                        status,
+                        ha="center",
+                        va="bottom",
+                        fontsize=7.2,
+                        color="#666666",
+                        linespacing=1.05,
+                    )
                 continue
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
@@ -282,10 +301,12 @@ def main() -> None:
                 )
 
         ax_mem = fig.add_subplot(gs[1, col])
-        gpu_mem = [row.get("mean_gpu_mem_used_mb") or 0.0 for row in task_rows]
+        gpu_mem = [
+            row.get("peak_gpu_mem_used_mb") or row.get("mean_gpu_mem_used_mb") or 0.0 for row in task_rows
+        ]
         sys_mem = [row.get("peak_system_ram_used_mb") or row.get("mean_system_ram_used_mb") or 0.0 for row in task_rows]
         width = 0.35
-        ax_mem.bar(
+        mem_bars_vram = ax_mem.bar(
             [i - width / 2 for i in x],
             gpu_mem,
             width=width,
@@ -294,7 +315,7 @@ def main() -> None:
             linewidth=0.5,
             label="VRAM",
         )
-        ax_mem.bar(
+        mem_bars_ram = ax_mem.bar(
             [i + width / 2 for i in x],
             sys_mem,
             width=width,
@@ -318,8 +339,23 @@ def main() -> None:
                 fontsize=8.5,
             )
             ax_mem.set_ylim(0, 1)
+        else:
+            ymax_mem = max(gpu_mem + sys_mem)
+            for i, (vram_bar, ram_bar, row) in enumerate(zip(mem_bars_vram, mem_bars_ram, task_rows)):
+                status = _missing_status(task_id, labels[i])
+                if status and not row:
+                    ax_mem.text(
+                        (vram_bar.get_x() + ram_bar.get_x() + ram_bar.get_width()) / 2,
+                        ymax_mem * 0.07,
+                        status,
+                        ha="center",
+                        va="bottom",
+                        fontsize=6.8,
+                        color="#666666",
+                        linespacing=1.05,
+                    )
         if col == 0:
-            ax_mem.set_ylabel("memory MB", fontsize=10)
+            ax_mem.set_ylabel("peak memory MB", fontsize=10)
             ax_mem.legend(fontsize=8, frameon=False, loc="upper left")
 
     # legend

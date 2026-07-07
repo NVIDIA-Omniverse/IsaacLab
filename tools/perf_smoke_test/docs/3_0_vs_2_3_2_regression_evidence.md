@@ -1,85 +1,28 @@
 # 3.0 vs 2.3.2 Regression Evidence
 
-This note is the shareable checklist/report shell for the follow-up requested by
-the team after the PhysX FPS graph. The actual numeric table is generated from
-CI artifacts by:
+This report is generated from downloaded benchmark artifacts. FPS uses the same steady-state convention as the gate: mean `Environment step effective FPS` after excluded warm-up frames.
 
-```bash
-python3 tools/perf_smoke_test/regression_evidence_pack.py \
-  --input isaaclab_2_3_2=regression-evidence/isaaclab_2_3_2 \
-  --input current_fork=regression-evidence/current_fork
-```
+## Inputs
 
-The manual workflow that produces those artifacts is:
+- `isaaclab_2_3_2`: `perf-output/regression-evidence-28622521773/regression-evidence-28622521773/isaaclab_2_3_2`
+- `current_fork`: `perf-output/regression-evidence-28622521773/regression-evidence-28622521773/current_fork`
 
-```text
-Performance Smoke - Regression Evidence Pack
-```
+## Summary
 
-## What Gets Collected
+| Label | Task | Backend | Env count | Samples | Mean FPS | Median FPS | Run-to-run std | Avg within-run std | Mean VRAM MB | Peak VRAM MB | Mean system RAM MB | Peak system RAM MB | CPU | GPU |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| current_fork | Isaac-Cartpole-Direct | default | 4096 | 4 | 298620.4 | 301115.8 | 70002.1 | 31449.4 | 1296.6 | 3337.0 | 1806.6 | 4550.7 | INTEL(R) XEON(R) GOLD 5512U (16 physical cores) | NVIDIA RTX PRO 6000 Blackwell Server Edition |
+| current_fork | Isaac-Factory-GearMesh-Direct | default | 512 | 4 | 1193.0 | 1207.0 | 34.8 | 72.9 | 4260.9 | 5769.0 | 4522.5 | 8667.1 | INTEL(R) XEON(R) GOLD 5512U (16 physical cores) | NVIDIA RTX PRO 6000 Blackwell Server Edition |
+| current_fork | Isaac-Repose-Cube-Shadow-Vision-Benchmark-Direct-v0 | default | 16 | 4 | 331.9 | 332.3 | 12.0 | 32.6 | 1837.0 | 6889.0 | 9237.6 | 15646.7 | INTEL(R) XEON(R) GOLD 5512U (16 physical cores) | NVIDIA RTX PRO 6000 Blackwell Server Edition |
+| current_fork | Isaac-Velocity-Flat-G1 | default | 512 | 4 | 10122.0 | 10665.2 | 1264.4 | 669.5 | 1658.5 | 3183.0 | 2257.8 | 4856.8 | INTEL(R) XEON(R) GOLD 5512U (16 physical cores) | NVIDIA RTX PRO 6000 Blackwell Server Edition |
+| isaaclab_2_3_2 | Isaac-Cartpole-Direct | physx | 4096 | 4 | 418426.4 | 448289.8 | 78550.6 | 55164.9 | 1273.1 | 3434.0 | 1185.0 | 3718.1 | N/A | N/A |
+| isaaclab_2_3_2 | Isaac-Factory-GearMesh-Direct | physx | 512 | 4 | 1251.8 | 1281.6 | 64.0 | 72.1 | 4452.4 | 5932.0 | 9678.4 | 15339.5 | N/A | N/A |
+| isaaclab_2_3_2 | Isaac-Velocity-Flat-G1 | physx | 512 | 4 | 11184.4 | 12146.1 | 2073.3 | 661.4 | 1965.3 | 3168.0 | 1704.4 | 4359.2 | N/A | N/A |
 
-- Repeated unprofiled `benchmark_non_rl.py` runs for IsaacLab 2.3.2 and the
-  current 3.0 fork using matching task, env-count, seed, and warm-up exclusion.
-- One shorter Nsight Systems profile per release/task. The workflow uploads the
-  `.nsys-rep` trace and `nsys stats` CSVs (`cuda_gpu_kern_sum`, `osrt_sum`,
-  `cuda_api_sum`) as CI artifacts for manual Google Drive upload.
-- VRAM from benchmark runtime measurements when present, plus `nvidia-smi`
-  samples.
-- System RAM usage from `docker stats` samples, summarized as mean and peak MB.
-- CPU evidence for Antoine's question: `lscpu`, `/proc/meminfo`, `pidstat`
-  samples when available, Docker CPU percentage, and host PID metadata.
-- One perception workload:
-  `Isaac-Repose-Cube-Shadow-Vision-Benchmark-Direct-v0` with cameras enabled.
+## Notes
 
-## Why Cartpole Needs A CPU Note
-
-Cartpole is the most overhead-bound task in this comparison. If the RTX PRO 6000
-runner is behind Antoine's laptop on Cartpole, the first thing to verify is the
-runner CPU model, physical core count, CPU governor/frequency, Docker CPU
-limits, and whether one host thread is saturated during the step loop. The new
-workflow collects those signals, so the next report can separate:
-
-- a real 3.0-vs-2.3.2 fork regression, visible within the same runner;
-- a shared runner CPU ceiling that depresses both releases' absolute FPS;
-- profiling overhead from the nsys pass, which is kept separate from the
-  unprofiled statistical samples.
-
-## Artifact Layout
-
-After the workflow completes, download the `regression-evidence-<run_id>`
-artifact. Important paths:
-
-- `host/lscpu.txt`: CPU model and physical topology.
-- `host/nvidia-smi-summary.csv`: GPU, driver, CUDA, and total VRAM.
-- `<label>/<task>/sample_*/benchmark_output.json`: raw benchmark JSON.
-- `<label>/<task>/sample_*/docker_stats.jsonl`: system RAM and Docker CPU
-  samples.
-- `<label>/<task>/sample_*/nvidia_smi_samples.csv`: GPU utilization and VRAM
-  samples.
-- `<label>/<task>/sample_*/pidstat.log`: process-level CPU/memory samples when
-  `pidstat` is available on the runner.
-- `<label>/<task>/nsys/nsys_trace.nsys-rep`: trace for Nsight Systems.
-- `<label>/<task>/nsys/nsys_*.csv`: trace summary reports.
-- `regression_evidence_summary.json`: machine-readable summary used by the
-  chart script.
-- `3_0_vs_2_3_2_regression_evidence.md`: generated markdown summary.
-
-## Slack Reply Skeleton
-
-Once the workflow artifact is downloaded and the Drive links are available:
-
-```text
-I collected a matched 2.3.2 vs current-fork evidence pack on the RTX PRO 6000
-runner. The artifact includes repeated unprofiled samples for FPS/std-dev,
-VRAM and system-RAM usage, host CPU details, Docker CPU/RAM samples, and one
-nsys trace per release/task. The traces have been uploaded here: <Drive link>.
-
-Cartpole remains the key CPU/host-overhead signal. The runner CPU is <CPU from
-lscpu>, with <physical cores> physical cores. Compared with Antoine's laptop
-number, the absolute Cartpole FPS looks <CPU-bound / not CPU-bound> because
-<pidstat/docker-stats/nsys osrt evidence>. The within-run fork-vs-2.3.2 delta
-is still <delta>, so <shared CPU ceiling does/does not> explain the full gap.
-
-We also added Shadow Vision Benchmark as a representative perception workload.
-Its fork-vs-2.3.2 result is <delta>, with VRAM <values> and system RAM <values>.
-```
+- `Run-to-run std` is computed across repeated benchmark samples for the same label/task/backend.
+- `Avg within-run std` is computed from per-frame steady-state FPS inside each sample, then averaged across samples.
+- `Mean VRAM MB` and `Peak VRAM MB` are populated from `nvidia-smi` samples when available. If an artifact only reports benchmark-level GPU memory, that value is used as peak VRAM.
+- `Mean system RAM MB` and `Peak system RAM MB` are populated from `docker stats` samples emitted by the evidence workflow.
+- Nsight Systems traces are uploaded separately as workflow artifacts and should be copied to Google Drive manually.

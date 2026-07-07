@@ -69,6 +69,14 @@
           "physx": 40.0,
           "newton": 0.0
         }
+      },
+      "noise_floor_pct": {
+        "rtx_pro_6000_blackwell": {
+          "newton": 2.52
+        },
+        "l40s": {
+          "newton": 2.06
+        }
       }
     }
   ]

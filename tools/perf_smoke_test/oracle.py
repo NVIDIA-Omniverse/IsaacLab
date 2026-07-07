@@ -57,6 +57,9 @@ class OracleResult:
     block_threshold_fps: float | None = None
     hard_floor_fps: float | None = None
     min_block_regression_pct: float = MIN_BLOCK_REGRESSION_PCT
+    baseline_noise_pct: float | None = None
+    effective_noise_pct: float | None = None
+    noise_floor_pct: float | None = None
     note: str | None = None
 
 
@@ -135,6 +138,11 @@ def _extract_fps_series(perf_smoke_test_info: list[dict]) -> list[float]:
     return []
 
 
+def _append_note(note: str | None, extra: str) -> str:
+    """Append semicolon-separated oracle context without dropping existing notes."""
+    return f"{note}; {extra}" if note else extra
+
+
 def compare(
     bench_result: dict,
     baseline: "Baseline | None",
@@ -143,6 +151,7 @@ def compare(
     artifact_dir: "Path",
     *,
     min_block_regression_pct: float = MIN_BLOCK_REGRESSION_PCT,
+    noise_floor_pct: float = 0.0,
 ) -> OracleResult:
     """Compare a benchmark result against its baseline and return an OracleResult."""
     task_id: str = bench_result["task_id"]
@@ -180,9 +189,33 @@ def compare(
     fps_p5 = _percentile(sorted_filtered, 5.0)
     fps_p95 = _percentile(sorted_filtered, 95.0)
 
+    # Confirm-on-BLOCK: when an initially-blocking cell is re-run, the gate FPS of
+    # each attempt (initial + reruns) is recorded in ``confirmation_fps_attempts``.
+    # Comparing the *median* of attempts means a single slow draw cannot finalize a
+    # BLOCK. The list is populated by confirm.py only for cells that initially block.
+    confirmation_attempts = [
+        float(value)
+        for value in bench_result.get("confirmation_fps_attempts") or []
+        if isinstance(value, (int, float)) and value > 0.0
+    ]
+    confirmation_requested = bool(bench_result.get("confirmation_fps_attempts"))
+    if len(confirmation_attempts) >= 2:
+        mean_fps = statistics.median(confirmation_attempts)
+
     baseline_fps = baseline.median_fps if baseline is not None else None
     baseline_sample_count = baseline.sample_count if baseline is not None else 0
     baseline_source = baseline.source if baseline is not None else "none"
+    baseline_noise_pct = None
+    effective_noise_fps = None
+    effective_noise_pct = None
+    applied_noise_floor_pct = None
+    if baseline is not None and baseline.median_fps > 0.0:
+        baseline_noise_pct = baseline.mad_fps / baseline.median_fps * 100.0
+        noise_floor_fps = max(0.0, float(noise_floor_pct)) / 100.0 * baseline.median_fps
+        effective_noise_fps = max(baseline.mad_fps, noise_floor_fps)
+        effective_noise_pct = effective_noise_fps / baseline.median_fps * 100.0
+        if noise_floor_fps > baseline.mad_fps:
+            applied_noise_floor_pct = float(noise_floor_pct)
     regression_pct = None
     if baseline_fps:
         regression_pct = ((mean_fps - baseline_fps) / baseline_fps) * 100.0
@@ -206,14 +239,17 @@ def compare(
         note = f"insufficient_baseline(n={baseline.sample_count},min={MIN_BASELINE_SAMPLES})"
     else:
         threshold_source = ThresholdSource.ROLLING_WINDOW.value
-        block_threshold = baseline.median_fps - baseline.k_block * baseline.mad_fps
-        warn_threshold = baseline.median_fps - baseline.k_warn * baseline.mad_fps
+        threshold_noise = effective_noise_fps if effective_noise_fps is not None else baseline.mad_fps
+        block_threshold = baseline.median_fps - baseline.k_block * threshold_noise
+        warn_threshold = baseline.median_fps - baseline.k_warn * threshold_noise
+        if applied_noise_floor_pct is not None:
+            note = _append_note(note, f"noise_floor={applied_noise_floor_pct:.2f}%")
         if mean_fps < block_threshold:
             if regression_pct is None or regression_pct <= -float(min_block_regression_pct):
                 verdict = OracleVerdict.BLOCK
             else:
                 verdict = OracleVerdict.WARN
-                note = "below_mad_block_but_inside_regression_floor"
+                note = _append_note(note, "below_mad_block_but_inside_regression_floor")
         elif mean_fps < warn_threshold:
             verdict = OracleVerdict.WARN
         else:
@@ -222,6 +258,22 @@ def compare(
     if verdict == OracleVerdict.PASS and was_retried:
         verdict = OracleVerdict.WARN
         note = note or "was_retried"
+
+    # Apply the confirm-on-BLOCK policy after the verdict is computed from the
+    # median attempt. A single slow draw can no longer finalize a block: an
+    # initial block that does not reproduce is downgraded to WARN, while a failed
+    # rerun stays blocking (fail-safe) but is surfaced explicitly so an
+    # operational rerun failure can never silently look like "nothing happened".
+    if confirmation_requested:
+        attempt_count = len(confirmation_attempts)
+        if attempt_count >= 2:
+            if verdict == OracleVerdict.BLOCK:
+                note = _append_note(note, f"block_confirmed(n={attempt_count})")
+            else:
+                verdict = OracleVerdict.WARN
+                note = _append_note(note, f"block_not_reproduced(n={attempt_count})")
+        else:
+            note = _append_note(note, "block_unconfirmed(reruns_failed)")
 
     return OracleResult(
         verdict=verdict,
@@ -246,5 +298,8 @@ def compare(
         block_threshold_fps=block_threshold,
         hard_floor_fps=hard_floor_fps,
         min_block_regression_pct=float(min_block_regression_pct),
+        baseline_noise_pct=baseline_noise_pct,
+        effective_noise_pct=effective_noise_pct,
+        noise_floor_pct=applied_noise_floor_pct,
         note=note,
     )
