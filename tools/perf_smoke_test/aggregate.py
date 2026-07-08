@@ -50,6 +50,9 @@ def _parse_args():
     parser.add_argument("--baselines_dir", type=Path, default=None, help="Flat-file baseline directory; bypasses git")
     parser.add_argument("--allow_baseline_update", default="false")
     parser.add_argument("--summary_file", default=None)
+    parser.add_argument(
+        "--junit_file", default=None, help="Write a JUnit XML of the verdicts (consumed by the omni-github upload)"
+    )
     parser.add_argument("--base_sha", default=None, help="PR base SHA for ancestry-aware baseline matching")
     parser.add_argument("--target_branch", default=None, help="Target protected branch, e.g. main/develop/release/x")
     parser.add_argument("--source_branch", default=None, help="Branch that produced baseline updates")
@@ -158,6 +161,41 @@ def _build_summary_table(rows: list[tuple]) -> str:
             f" | {runtime} | {'; '.join(note_parts)} |"
         )
     return "\n".join(lines)
+
+
+def _write_junit(rows, path: str) -> None:
+    """Write a minimal JUnit XML so the omni-github upload action can ingest verdicts.
+
+    Each task/backend cell is one ``<testcase>``; a BLOCK or HARD_FAILURE verdict is
+    recorded as a ``<failure>`` so omni-github marks that row as not passed. WARN and
+    PASS stay green (the gate is advisory), matching the job's own exit behavior.
+    """
+    import xml.etree.ElementTree as ET
+
+    suite = ET.Element("testsuite", name="perf-smoke")
+    failures = 0
+    for result, bench_result in rows:
+        case = ET.SubElement(
+            suite,
+            "testcase",
+            classname=f"perf-smoke.{result.task_id}",
+            name=result.backend,
+            time=f"{bench_result.wall_time_s or 0.0:.3f}",
+        )
+        if result.verdict in (OracleVerdict.BLOCK, OracleVerdict.HARD_FAILURE):
+            failures += 1
+            failure = ET.SubElement(
+                case,
+                "failure",
+                message=(
+                    f"{result.verdict.value}: fps={_fmt(result.measured_fps)} "
+                    f"regression={_fmt(result.regression_pct, 2)}%"
+                ),
+            )
+            failure.text = result.note or result.failure_phase or ""
+    suite.set("tests", str(len(rows)))
+    suite.set("failures", str(failures))
+    ET.ElementTree(suite).write(path, encoding="utf-8", xml_declaration=True)
 
 
 def _write_github_output(**values) -> None:
@@ -347,6 +385,9 @@ def main() -> int:
                     )
             fh.write(table)
             fh.write("\n")
+
+    if args.junit_file:
+        _write_junit(rows, args.junit_file)
 
     output_values = {"baseline_read_sha": baseline_read_sha}
     if baseline_push_result:

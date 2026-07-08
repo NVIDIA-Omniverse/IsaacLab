@@ -622,52 +622,12 @@ jobs:
       run: |
         python3 tools/perf_smoke_test/github_gate_context.py
 
-    # Pull the same prebuilt CI image the bench cells used, so confirm-on-BLOCK can
-    # re-run a blocking cell on this runner. Skipped when confirmation is disabled
-    # (PERF_SMOKE_CONFIRM_BLOCK_RERUNS=0). The pull is ~seconds from nvcr.io.
-    - name: Pull prebuilt CI image (for confirm-on-BLOCK)
-      id: pull_image
-      if: ${{ (vars.PERF_SMOKE_CONFIRM_BLOCK_RERUNS || '2') != '0' }}
-      continue-on-error: true
-      env:
-        CI_IMAGE_REF: ${{ vars.PERF_SMOKE_CI_IMAGE || needs.config.outputs.isaaclab_image_ref }}
-      run: |
-        set -euo pipefail
-        DOCKER_CONFIG_DIR="$(mktemp -d)"
-        echo '{"credsStore":""}' > "${DOCKER_CONFIG_DIR}/config.json"
-        export DOCKER_CONFIG="${DOCKER_CONFIG_DIR}"
-        REGISTRY="${CI_IMAGE_REF%%/*}"
-        if [ "${REGISTRY}" = "nvcr.io" ] && [ -n "${NGC_API_KEY:-}" ]; then
-          echo "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
-        fi
-        docker pull "${CI_IMAGE_REF}"
-        docker tag "${CI_IMAGE_REF}" "${{ env.CI_IMAGE_TAG }}"
-        rm -rf "${DOCKER_CONFIG_DIR}"
-        mkdir -p "${{ github.workspace }}/jit-cache/warp" "${{ github.workspace }}/jit-cache/nv"
-        mkdir -p "${{ github.workspace }}/kit-cache"
-        chmod -R a+rwX "${{ github.workspace }}" 2>/dev/null || true
-
     - name: Run aggregate oracle
       id: aggregate
-      env:
-        # Re-run any BLOCK cell this many times and decide on the median of attempts.
-        # Set the repo variable to 0 to disable confirm-on-BLOCK entirely.
-        CONFIRM_BLOCK_RERUNS: ${{ vars.PERF_SMOKE_CONFIRM_BLOCK_RERUNS || '2' }}
       run: |
         GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | xargs)"
         if [[ -z "${GPU_MODEL}" ]]; then
           GPU_MODEL="unknown-gpu"
-        fi
-        # Confirm-on-BLOCK re-runs blocking cells in the CI image; only enable the
-        # docker rerun backend if the image pull above actually succeeded.
-        CONFIRM_ARGS=()
-        if [ "${CONFIRM_BLOCK_RERUNS}" != "0" ] && [ "${{ steps.pull_image.outcome }}" = "success" ]; then
-          CONFIRM_ARGS=(--confirm_rerun_mode docker
-                        --confirm_block_reruns "${CONFIRM_BLOCK_RERUNS}"
-                        --ci_image_tag "${{ env.CI_IMAGE_TAG }}"
-                        --workspace "${{ github.workspace }}")
-        elif [ "${CONFIRM_BLOCK_RERUNS}" != "0" ]; then
-          echo "::warning::CI image pull failed; finalizing on the single initial draw (no confirm-on-BLOCK)"
         fi
         # Write the verdict table to a dedicated file so it can be reused for the
         # sticky PR comment, then mirror it into the run's step summary.
@@ -684,9 +644,47 @@ jobs:
           --source_branch "${{ steps.gate_context.outputs.source_branch }}" \
           --allow_baseline_update "${{ steps.gate_context.outputs.allow_update }}" \
           --trusted_source "${{ steps.gate_context.outputs.trusted_source }}" \
-          "${CONFIRM_ARGS[@]}" \
-          --summary_file "${SUMMARY_FILE}"
+          --summary_file "${SUMMARY_FILE}" \
+          --junit_file "${{ github.workspace }}/perf_results.xml"
         cat "${SUMMARY_FILE}" >> "${GITHUB_STEP_SUMMARY}" || true
+
+    # Publish the verdicts to omni-github via the shared upload action (converts the
+    # JUnit file above into the omni-github test-result artifact contract). Additive
+    # instrumentation: a missing file is skipped with a warning, never fails the job.
+    - name: Upload perf results to omni-github
+      if: always()
+      uses: ./.github/actions/upload-omni-github-test-results
+      with:
+        junit-file: ${{ github.workspace }}/perf_results.xml
+        artifact-prefix: perf-smoke-results
+        test-tool-id: perf-smoke
+        test-type: performance
+
+    # Aggregate gate signal as a single stable commit status on the PR head. This
+    # is the status maintainers can mark required: it stays green while the gate is
+    # advisory (gate_config.blocking=false, aggregate.py always exits 0), and turns
+    # red once blocking is enabled and the oracle reports a BLOCK/HARD_FAILURE
+    # (which fails the aggregate step above). Distinct from the per-task
+    # `perf-smoke (...)` statuses, which only report whether each benchmark ran.
+    - name: Report aggregate status
+      if: always()
+      uses: actions/github-script@v7
+      env:
+        AGGREGATE_OUTCOME: ${{ steps.aggregate.outcome }}
+      with:
+        script: |
+          const ok = process.env.AGGREGATE_OUTCOME === 'success';
+          const statusSha = context.payload.pull_request?.head?.sha || context.sha;
+          await github.rest.repos.createCommitStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            sha: statusSha,
+            state: ok ? 'success' : 'failure',
+            context: 'perf-smoke-test',
+            description: ok
+              ? 'perf-smoke verdicts posted (advisory)'
+              : 'perf-smoke gate reported a regression',
+          });
 
     # Post the verdict table as a single sticky comment on the PR (updated in place
     # each run), so reviewers see regressions without opening the Actions tab.

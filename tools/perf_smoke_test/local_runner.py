@@ -121,12 +121,6 @@ def _parse_args() -> argparse.Namespace:
         default=_MODULE_DIR / "gate_config.json",
         help="Path to gate_config.json (controls advisory vs blocking mode)",
     )
-    p.add_argument(
-        "--confirm_block_reruns",
-        type=int,
-        default=0,
-        help="If >0, re-run any BLOCK cell this many times (no Docker) and decide on the median of attempts",
-    )
     return p.parse_args()
 
 
@@ -262,7 +256,6 @@ def _run_aggregate(
     gpu_model: str,
     gate_config: Path,
     allow_baseline_update: bool,
-    confirm_block_reruns: int = 0,
 ) -> int:
     """Run aggregate.py over all artifacts and return its exit code."""
     agg_script = _MODULE_DIR / "aggregate.py"
@@ -280,8 +273,6 @@ def _run_aggregate(
         "--allow_baseline_update",
         "true" if allow_baseline_update else "false",
     ]
-    if confirm_block_reruns > 0:
-        cmd += ["--confirm_rerun_mode", "local", "--confirm_block_reruns", str(confirm_block_reruns)]
     sys.stdout.flush()
     result = subprocess.run(cmd)
     return result.returncode
@@ -420,7 +411,6 @@ def main() -> int:
         gpu_model,
         args.gate_config,
         args.allow_baseline_update,
-        confirm_block_reruns=args.confirm_block_reruns,
     )
     return rc
 
