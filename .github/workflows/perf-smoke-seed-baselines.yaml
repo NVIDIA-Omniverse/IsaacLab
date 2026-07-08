@@ -27,8 +27,6 @@
 name: Performance Smoke - Seed Baselines
 
 on:
-  push:
-    branches: [unified-POC, 'perf-smoke/**']
   workflow_dispatch:
     inputs:
       branches:
