@@ -629,8 +629,18 @@ jobs:
         if [[ -z "${GPU_MODEL}" ]]; then
           GPU_MODEL="unknown-gpu"
         fi
+        # omni-github app.platform mirrors the shared upload action's derivation so
+        # dashboard rows are grouped consistently with the rest of IsaacLab CI.
+        case "${RUNNER_OS:-Linux}-${RUNNER_ARCH:-X64}" in
+          Linux-X64)    APP_PLATFORM="linux-x86_64" ;;
+          Linux-ARM64)  APP_PLATFORM="linux-aarch64" ;;
+          Windows-X64)  APP_PLATFORM="windows-x86_64" ;;
+          *) APP_PLATFORM="$(printf '%s-%s' "${RUNNER_OS:-linux}" "${RUNNER_ARCH:-x64}" | tr '[:upper:]' '[:lower:]')" ;;
+        esac
         # Write the verdict table to a dedicated file so it can be reused for the
-        # sticky PR comment, then mirror it into the run's step summary.
+        # sticky PR comment, then mirror it into the run's step summary. The
+        # omni-github artifact carries the same verdicts plus per-task diagnostics
+        # (FPS, regression, hardware, software, contract hashes) as custom.perf_smoke.* fields.
         SUMMARY_FILE="${{ github.workspace }}/verdict_summary.md"
         python3 tools/perf_smoke_test/aggregate.py \
           --artifacts_dir artifacts/ \
@@ -645,20 +655,61 @@ jobs:
           --allow_baseline_update "${{ steps.gate_context.outputs.allow_update }}" \
           --trusted_source "${{ steps.gate_context.outputs.trusted_source }}" \
           --summary_file "${SUMMARY_FILE}" \
-          --junit_file "${{ github.workspace }}/perf_results.xml"
+          --omni_github_dir "${{ github.workspace }}/omni-github-artifact" \
+          --omni_platform "${APP_PLATFORM}" \
+          --omni_app_config "${GITHUB_JOB}"
         cat "${SUMMARY_FILE}" >> "${GITHUB_STEP_SUMMARY}" || true
 
-    # Publish the verdicts to omni-github via the shared upload action (converts the
-    # JUnit file above into the omni-github test-result artifact contract). Additive
-    # instrumentation: a missing file is skipped with a warning, never fails the job.
-    - name: Upload perf results to omni-github
+    # Sanity-check the emitted omni-github result before upload so a malformed
+    # payload is caught here (with a clear log) rather than silently dropped by
+    # omni-github ingestion. Kept dependency-free (stdlib json only): the shared
+    # result-json.schema.json is a stricter lint whose customValue oneOf rejects
+    # integral numbers, so it cannot gate a numeric-diagnostics payload. Additive:
+    # a missing result (e.g. aggregate crashed before writing) is skipped with a
+    # warning, never fails the job.
+    - name: Validate omni-github artifact
+      id: omni_validate
       if: always()
-      uses: ./.github/actions/upload-omni-github-test-results
+      run: |
+        set -euo pipefail
+        result_json="${{ github.workspace }}/omni-github-artifact/_testoutput/test_results.json"
+        if [ ! -f "${result_json}" ]; then
+          echo "::warning::No omni-github result produced; skipping upload"
+          echo "upload=false" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+        python3 - "${result_json}" <<'PY'
+        import json, sys
+
+        result = json.load(open(sys.argv[1]))
+        assert result.get("test_tool_id"), "missing test_tool_id"
+        assert result.get("app", {}).get("platform"), "missing app.platform"
+        tests = result.get("tests")
+        assert isinstance(tests, list) and tests, "tests must be a non-empty list"
+        for row in tests:
+            assert row.get("test_id"), "row missing test_id"
+            assert isinstance(row.get("passed"), bool), "row.passed must be bool"
+            assert isinstance(row.get("duration"), (int, float)), "row.duration must be numeric"
+            namespaces = row.get("custom", {})
+            assert namespaces, "row.custom must be a non-empty namespace map"
+            for name, fields in namespaces.items():
+                assert fields, f"custom namespace {name!r} must be non-empty"
+        print(f"omni-github result OK: {len(tests)} rows")
+        PY
+        echo "upload=true" >> "${GITHUB_OUTPUT}"
+
+    # Upload the artifact under the omni-github name contract
+    # (<prefix>--v1-<repo_id>-<run_id>-<run_attempt>-<check_run_id>) so omni-github
+    # ingests it for the registered NVIDIA-Omniverse/IsaacLab repository.
+    - name: Upload perf results to omni-github
+      if: always() && steps.omni_validate.outputs.upload == 'true'
+      uses: actions/upload-artifact@v7
       with:
-        junit-file: ${{ github.workspace }}/perf_results.xml
-        artifact-prefix: perf-smoke-results
-        test-tool-id: perf-smoke
-        test-type: performance
+        name: perf-smoke-results--v1-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ job.check_run_id }}
+        path: ${{ github.workspace }}/omni-github-artifact
+        if-no-files-found: error
+        retention-days: 7
+        compression-level: 9
 
     # Aggregate gate signal as a single stable commit status on the PR head. This
     # is the status maintainers can mark required: it stays green while the gate is
