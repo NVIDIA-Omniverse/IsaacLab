@@ -1,0 +1,16 @@
+{
+  "task": "Isaac-Cartpole-v0",
+  "gpu": "NVIDIA L40S",
+  "num_frames": 300,
+  "warmup_frames": 2,
+  "window": 20,
+  "_note": "PROVISIONAL single-run local baseline (isaaclab 6.6.1 / warp 1.13.0, L40S dev box). The prior 5-sample window (~115k FPS) was calibrated on an older build and is ~2.4x stale. With <3 samples the comparator uses the baseline.json static fallback; re-record a full window on the runner fleet to restore window-based gating.",
+  "samples": [
+    {
+      "fps": 276401.7,
+      "wall_s": 17.0,
+      "source": "local_l40s/Isaac-Cartpole_physx_n4096/single",
+      "ts": "2026-06-11T21:00:48+00:00"
+    }
+  ]
+}
