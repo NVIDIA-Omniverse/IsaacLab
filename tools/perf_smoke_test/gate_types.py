@@ -47,6 +47,7 @@ class BisectVerdict(str, Enum):
 
 
 class FailurePhase(str, Enum):
+    TOOLING_INCOMPATIBLE = "tooling_incompatible"
     IMPORT = "import"
     INIT = "init"
     RUNTIME = "runtime"

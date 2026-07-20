@@ -3,11 +3,11 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Post-benchmark script: normalizes benchmark output and writes perf_smoke_test_result.json.
+"""Post-benchmark script: normalizes a runtime bundle and writes the gate result.
 
-Locates the timestamped runtime bundle written by perf_runtime.py, copies it
-to the canonical ``perf_smoke_test_info.json``, classifies the failure phase from the
-captured log, and writes ``perf_smoke_test_result.json`` for the aggregate job.
+Locates the pinned perf-smoke runtime bundle, copies it to the canonical
+``perf_smoke_test_info.json``, classifies the failure phase, and writes
+``perf_smoke_test_result.json`` for the aggregate job.
 
 Usage::
 
@@ -28,11 +28,8 @@ import sys
 from pathlib import Path
 
 _MODULE_DIR = Path(__file__).parent
-_TOOLS_DIR = _MODULE_DIR.parent
 if str(_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(_MODULE_DIR))
-if str(_TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_DIR))
 
 from backend_identity import (  # noqa: E402
     backend_identity_from_benchmark_info,
@@ -42,14 +39,14 @@ from backend_identity import (  # noqa: E402
     normalize_physics_backend,
     normalize_render_backend,
 )
-from benchmark_result_adapter import load_info, project_runtime  # noqa: E402
+from benchmark_result_adapter import load_info, project_sample  # noqa: E402
 from contracts import BenchResult  # noqa: E402
+from failure_classifier import classify_failure_phase  # noqa: E402
 from gate_config import load_gate_config  # noqa: E402
 from gate_types import FailurePhase  # noqa: E402
 from gpu_identity import normalize_gpu_fields  # noqa: E402
 from launch_config import fallback_launch_config, load_launch_config  # noqa: E402
 from runtime_contract import build_runtime_contract, build_runtime_publish_info  # noqa: E402
-from subprocess_runner import classify_failure_phase  # noqa: E402
 from task_config import get_task  # noqa: E402
 
 
@@ -115,25 +112,18 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _normalize_benchmark_output(artifact_dir: Path, task_id: str) -> bool:
-    """Copy the timestamped runtime bundle to ``perf_smoke_test_info.json``.
-
-    ``perf_runtime.py`` writes ``benchmark_runtime_{task_id}_{timestamp}.json``
-    (a schema-v1 :class:`~isaaclab.test.benchmark.schema.RuntimeBundle`). The gate
-    reads the canonical ``perf_smoke_test_info.json``; this bridges the gap.
+    """Copy the newest recognized benchmark artifact to its canonical path.
 
     Returns True if perf_smoke_test_info.json exists after call
     """
     perf_smoke_test_info = artifact_dir / "perf_smoke_test_info.json"
     if perf_smoke_test_info.exists():
         return True
-    # Primary pattern: exact task_id match
     matches = sorted(glob.glob(str(artifact_dir / f"benchmark_runtime_{task_id}_*.json")))
     if not matches:
-        # Fallback: any benchmark_runtime_*.json in the artifact dir
-        matches = sorted(glob.glob(str(artifact_dir / "benchmark_runtime_*.json")))
-    if not matches:
         return False
-    shutil.copy(matches[-1], perf_smoke_test_info)
+    newest = max(matches, key=lambda path: Path(path).stat().st_mtime_ns)
+    shutil.copy(newest, perf_smoke_test_info)
     return True
 
 
@@ -219,7 +209,7 @@ def main() -> int:
         timeout_s=args.timeout_s,
     )
 
-    # Read the runtime bundle (schema v1) and project it into a typed RuntimeSample.
+    # Project either benchmark era into the same typed RuntimeSample.
     sample = None
     benchmark_info: dict = {}
     config_mismatch: str | None = None
@@ -229,8 +219,8 @@ def main() -> int:
     runtime_info = None
     if perf_smoke_test_info_present:
         info_path = artifact_dir / "perf_smoke_test_info.json"
-        bundle = load_info(info_path)
-        sample = project_runtime(bundle) if bundle is not None else None
+        payload = load_info(info_path)
+        sample = project_sample(payload, warmup_frames=int(warmup_frames or 0)) if payload is not None else None
         if sample is not None:
             benchmark_info = sample.benchmark_info()
             observed_backend = backend_identity_from_benchmark_info(benchmark_info)
@@ -247,7 +237,8 @@ def main() -> int:
             )
             config_mismatch = _config_drift(benchmark_info, launch_config)
         else:
-            # File exists but is not a valid schema-v1 bundle (corrupt/truncated).
+            # File exists but is not a recognized benchmark payload (corrupt,
+            # truncated, or an unsupported future contract).
             perf_smoke_test_info_present = False
     config_mismatch = " ".join(part for part in (phase2_arg_mismatch, config_mismatch) if part) or None
     if config_mismatch and failure_phase is None:
