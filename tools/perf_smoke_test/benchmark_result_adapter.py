@@ -30,9 +30,6 @@ from typing import Any
 
 from contracts import RuntimeSample
 
-# Map the schema's rendering-backend vocabulary to the gate's render-preset
-# tokens used in tasks.json / backend_identity.  ``"none"`` (headless, no camera)
-# maps to ``None``.
 _SCHEMA_RENDER_TO_GATE: dict[str | None, str | None] = {
     None: None,
     "": None,
@@ -44,52 +41,36 @@ _SCHEMA_RENDER_TO_GATE: dict[str | None, str | None] = {
 
 
 def _as_dict(value: Any) -> dict:
-    """Return ``value`` if it is a dict, else an empty dict.
-
-    Bundle sections are always dicts in a valid schema-v1 file; this keeps a
-    malformed/hand-edited bundle (e.g. a list where a dict is expected) from
-    crashing the projection so the gate degrades gracefully instead of the
-    result builder aborting with no output.
-    """
+    """Return ``value`` if it is a dict, else an empty dict."""
     return value if isinstance(value, dict) else {}
 
 
 def steady_state_slice(step_times: list[float], warmup_frames: int) -> tuple[list[float], int]:
-    """Drop the leading ``warmup_frames`` cold-start steps, keeping >=1 frame.
-
-    Producer-side helper used by ``perf_runtime.py`` to exclude warmup at the
-    source before aggregation. If ``warmup_frames`` would leave nothing, it is
-    clamped to ``len(step_times) - 1`` so the aggregate never silently falls back
-    to the full, cold-start-inclusive series (which would misreport non-steady
-    numbers as steady-state).
+    """Drop leading cold-start steps while retaining at least one frame.
 
     Args:
         step_times: Per-step wall times [s], in order.
         warmup_frames: Requested number of leading steps to discard.
 
     Returns:
-        ``(measured_step_times, warmup_applied)`` where ``warmup_applied`` is the
-        number of leading steps actually discarded (may be clamped below the
-        request).
+        Measured step times and the number of warmup frames actually removed.
     """
-    n = len(step_times)
-    if n == 0:
+    if not step_times:
         return [], 0
-    warmup = max(0, min(warmup_frames, n - 1))
+    warmup = max(0, min(warmup_frames, len(step_times) - 1))
     return list(step_times[warmup:]), warmup
 
 
-def load_info(info_path: Path) -> dict | None:
-    """Load the benchmark info JSON, or ``None`` if it is missing/unreadable."""
+def load_info(info_path: Path) -> object | None:
+    """Load benchmark JSON, or ``None`` when it is missing or unreadable."""
     try:
-        data = json.loads(Path(info_path).read_text())
+        return json.loads(Path(info_path).read_text())
     except Exception:
         return None
-    return data if isinstance(data, dict) else None
 
 
 def is_runtime_bundle(data: Any) -> bool:
-    """Return True when ``data`` looks like a schema-v1 runtime/training bundle."""
+    """Return whether ``data`` looks like a schema-v1 runtime/training bundle."""
     return (
         isinstance(data, dict)
         and isinstance(data.get("run"), dict)
@@ -99,7 +80,7 @@ def is_runtime_bundle(data: Any) -> bool:
 
 
 def gpu_driver_version() -> str | None:
-    """Return the GPU driver version from nvidia-smi, or ``None`` if unavailable."""
+    """Return the GPU driver version from ``nvidia-smi``, when available."""
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader,nounits"],
@@ -116,7 +97,7 @@ def gpu_driver_version() -> str | None:
 
 
 def _current_gpu(bundle: dict) -> dict:
-    """Return the first GPU device dict from the hardware snapshot (or ``{}``)."""
+    """Return the first GPU device dictionary."""
     devices = _as_dict(bundle.get("hardware")).get("gpu_devices") or []
     return devices[0] if devices and isinstance(devices[0], dict) else {}
 
@@ -129,53 +110,40 @@ def render_backend(bundle: dict) -> str | None:
 
 
 def fps_stats(bundle: dict) -> dict:
-    """Return ``raw_fps_{mean,std,min,max}`` from the bundle's runtime aggregates.
-
-    ``mean``/``std``/``max`` come from ``total_fps``; ``min`` (worst steady-state
-    frame) is recovered from the slowest step time.  Percentile fields are not
-    available in the schema and are intentionally omitted.
-    """
+    """Return steady-state FPS statistics from runtime aggregates."""
     runtime = _as_dict(bundle.get("runtime"))
     total_fps = _as_dict(runtime.get("total_fps"))
-    iter_time = _as_dict(runtime.get("iteration_time_s"))
-    steps_per_iter = runtime.get("steps_per_iteration") or _as_dict(bundle.get("run")).get("num_envs")
-
-    out: dict = {}
+    iteration_time = _as_dict(runtime.get("iteration_time_s"))
+    steps_per_iteration = runtime.get("steps_per_iteration") or _as_dict(bundle.get("run")).get("num_envs")
+    output: dict[str, float] = {}
     if isinstance(total_fps.get("mean"), (int, float)):
-        out["raw_fps_mean"] = float(total_fps["mean"])
+        output["raw_fps_mean"] = float(total_fps["mean"])
     if isinstance(total_fps.get("std"), (int, float)):
-        out["raw_fps_std"] = float(total_fps["std"])
+        output["raw_fps_std"] = float(total_fps["std"])
     if isinstance(total_fps.get("peak"), (int, float)):
-        out["raw_fps_max"] = float(total_fps["peak"])
-    peak_step = iter_time.get("peak")
-    if isinstance(peak_step, (int, float)) and peak_step > 0 and steps_per_iter:
-        out["raw_fps_min"] = float(steps_per_iter) / float(peak_step)
-    return out
+        output["raw_fps_max"] = float(total_fps["peak"])
+    peak_step = iteration_time.get("peak")
+    if isinstance(peak_step, (int, float)) and peak_step > 0 and steps_per_iteration:
+        output["raw_fps_min"] = float(steps_per_iteration) / float(peak_step)
+    return output
 
 
 def startup_seconds(bundle: dict) -> float | None:
-    """Return total launch-to-first-step wall time [s] (sum of startup phases)."""
+    """Return total launch-to-first-step wall time [s]."""
     startup = _as_dict(_as_dict(bundle.get("runtime")).get("startup_time_s"))
-    values = [v for v in startup.values() if isinstance(v, (int, float))]
+    values = [value for value in startup.values() if isinstance(value, (int, float))]
     return float(sum(values)) if values else None
 
 
 def provenance(bundle: dict) -> dict:
-    """Return ``{hardware, software, git}`` for the runtime-compatibility contract.
-
-    ``software`` is the bundle's typed ``versions`` map verbatim (its field names
-    — ``isaaclab``/``isaacsim``/``torch``/``warp``/``isaaclab_physx``/
-    ``isaaclab_newton``/``newton``/``isaaclab_ov`` — match the contract policy
-    paths, so the ``runtime_contract_hash`` is preserved across the migration).
-    """
+    """Return hardware, software, and Git runtime provenance."""
     versions = _as_dict(bundle.get("versions"))
     hardware_snapshot = _as_dict(bundle.get("hardware"))
     gpu = _current_gpu(bundle)
-
-    software = {k: v for k, v in versions.items() if v is not None and not k.startswith("git_")}
+    software = {key: value for key, value in versions.items() if value is not None and not key.startswith("git_")}
     hardware = {
-        k: v
-        for k, v in {
+        key: value
+        for key, value in {
             "cpu_name": hardware_snapshot.get("cpu_name"),
             "cpu_physical_cores": hardware_snapshot.get("cpu_count"),
             "total_ram_gb": hardware_snapshot.get("ram_gb"),
@@ -184,7 +152,7 @@ def provenance(bundle: dict) -> dict:
             "gpu_total_memory_gb": gpu.get("mem_gb"),
             "gpu_compute_capability": gpu.get("compute_cap"),
         }.items()
-        if v is not None
+        if value is not None
     }
     git = {
         gate_key: versions[schema_key]
@@ -249,11 +217,11 @@ def runtime_resources(bundle: dict) -> dict:
         "system_ram_peak_mb": _gb_to_mb(ram.get("peak")),
         "cpu_util_pct": _pct(cpu_util.get("mean")),
     }
-    return {k: v for k, v in diag.items() if v is not None}
+    return {key: value for key, value in diag.items() if value is not None}
 
 
 def benchmark_info(bundle: dict) -> dict:
-    """Return the run's self-reported identity for launch/run drift checks."""
+    """Return the run's self-reported workload identity."""
     run = _as_dict(bundle.get("run"))
     config = _as_dict(run.get("config"))
     extra = _as_dict(bundle.get("extra"))
@@ -268,15 +236,11 @@ def benchmark_info(bundle: dict) -> dict:
         "render_backend": render_backend(bundle),
         "presets": config.get("presets") or [],
     }
-    return {k: v for k, v in info.items() if v is not None}
+    return {key: value for key, value in info.items() if value is not None}
 
 
 def project_runtime(bundle: dict) -> RuntimeSample | None:
-    """Project a runtime bundle into a typed :class:`~contracts.RuntimeSample`.
-
-    Returns ``None`` when ``bundle`` is not a valid schema-v1 runtime bundle, so the
-    caller can degrade to a HARD_FAILURE (missing benchmark output).
-    """
+    """Project one RuntimeBundle into a canonical runtime sample."""
     if not is_runtime_bundle(bundle):
         return None
     stats = fps_stats(bundle)
@@ -299,3 +263,9 @@ def project_runtime(bundle: dict) -> RuntimeSample | None:
         provenance=provenance(bundle),
         runtime_resources=runtime_resources(bundle),
     )
+
+
+def project_sample(payload: object, *, warmup_frames: int = 0) -> RuntimeSample | None:
+    """Project the pinned RuntimeBundle payload into the canonical sample."""
+    del warmup_frames  # warmup is applied by perf_runtime.py before aggregation
+    return project_runtime(payload) if is_runtime_bundle(payload) else None
