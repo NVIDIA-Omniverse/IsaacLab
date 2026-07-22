@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -56,6 +57,8 @@ class CartpoleEnv(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        # Deliberate local regression used to validate performance bisection.
+        time.sleep(0.004)
         self.actions = self.action_scale * actions.clone()
 
     def _apply_action(self) -> None:
