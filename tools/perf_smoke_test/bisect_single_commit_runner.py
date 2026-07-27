@@ -70,6 +70,14 @@ from launch_config import hydra_args_for_task, task_to_launch_config, write_laun
 from task_config import TaskConfig, caches_for_backend, get_task  # noqa: E402
 from tooling_capability import TOOLING_INCOMPATIBLE_EXIT_CODE  # noqa: E402
 
+_PROGRESS_PREFIX = "[perf-bisect]"
+
+
+def _progress(message: str) -> None:
+    """Emit a structured inner-runner milestone in verbose mode."""
+    if os.environ.get("PERF_BISECT_PROGRESS") == "verbose":
+        print(f"{_PROGRESS_PREFIX} {message}", flush=True)
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one commit/task/backend for the perf bisection POC.")
@@ -439,6 +447,8 @@ def _run_with_live_output(cmd: list[str], *, cwd: Path, log_path: Path) -> int:
                 + "\n"
             )
             live_fh.flush()
+            if line.startswith(_PROGRESS_PREFIX):
+                print(line, end="" if line.endswith("\n") else "\n", flush=True)
 
         while True:
             for key, _ in selector.select(timeout=1.0):
@@ -541,8 +551,10 @@ def _prepare_source_clone(source_dir: Path, commit_sha: str) -> None:
         EnvSkip: With category ``source_checkout_failed`` when even a fresh re-clone
             cannot materialize the commit.
     """
+    _progress(f"checking out candidate source {commit_sha[:12]}")
     try:
         _materialize_source_clone(source_dir, commit_sha)
+        _progress(f"candidate source ready at {source_dir}")
         return
     except RuntimeError as first_error:
         print(
@@ -553,6 +565,7 @@ def _prepare_source_clone(source_dir: Path, commit_sha: str) -> None:
     _reset_source_dir(source_dir)
     try:
         _materialize_source_clone(source_dir, commit_sha)
+        _progress(f"candidate source ready at {source_dir} after re-clone")
     except RuntimeError as retry_error:
         raise EnvSkip(
             "source_checkout_failed", f"could not materialize {commit_sha[:12]} after re-clone: {retry_error}"
@@ -1055,6 +1068,8 @@ def _docker_reconstruct_command(
         "ACCEPT_EULA=Y",
         "-e",
         "PYTHONUNBUFFERED=1",
+        "-e",
+        f"PERF_BISECT_PROGRESS={os.environ.get('PERF_BISECT_PROGRESS', 'quiet')}",
         "-v",
         f"{harness_root}:/harness:ro",
         *git_metadata_mounts,
@@ -1266,6 +1281,7 @@ def main() -> int:
     if args.mode == "docker-reconstruct":
         # The container's inner local-reconstruct runner owns the full artifact
         # contract (launch_config, bisect_env.json, result); just dispatch and relay.
+        _progress(f"starting isolated reconstruction container for {commit_sha[:12]}")
         return _run_docker_reconstruct(args, commit_sha=commit_sha, task=task, artifact_dir=artifact_dir)
 
     launch_config = task_to_launch_config(
@@ -1338,6 +1354,7 @@ def main() -> int:
                 f"mode={args.mode} ENV_SKIP={skip.category} detail={skip.detail}"
             )
             return 0
+        _progress(f"running benchmark for {commit_sha[:12]}")
         exit_code, wall_time_s = _run_reconstructed_benchmark(
             tooling_root=tooling_root,
             task=task,

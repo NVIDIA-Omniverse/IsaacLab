@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -31,7 +32,18 @@ from bisection.models import (  # noqa: E402
     TaskSpec,
     TimeoutPolicy,
 )
+from bisection.progress import PROGRESS_MODES, configure_progress, format_metric  # noqa: E402
 from bisection.tooling import ToolingError, materialize_tooling_snapshot, resolve_tooling_plan  # noqa: E402
+
+
+def _add_progress_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the common human-readable progress option to a workflow parser."""
+    parser.add_argument(
+        "--progress",
+        choices=PROGRESS_MODES,
+        default="compact",
+        help="Terminal progress detail: compact (default), verbose setup milestones, or quiet.",
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -46,6 +58,7 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Full tooling commit SHA for authoritative runs, or WORKTREE for non-authoritative development.",
     )
+    _add_progress_argument(dry)
 
     local = sub.add_parser(
         "run-local",
@@ -205,6 +218,7 @@ def _parse_args() -> argparse.Namespace:
         default=3,
         help="Max LLM probe decisions before the probe reports a harness blocker.",
     )
+    _add_progress_argument(local)
 
     commit = sub.add_parser(
         "benchmark-commit",
@@ -260,6 +274,7 @@ def _parse_args() -> argparse.Namespace:
     commit.add_argument("--api_key_env", default="OPENAI_API_KEY")
     commit.add_argument("--probe", choices=("none", "llm"), default="none")
     commit.add_argument("--probe_max_attempts", type=int, default=3)
+    _add_progress_argument(commit)
 
     selftest = sub.add_parser(
         "recovery-selftest",
@@ -598,6 +613,8 @@ def main() -> int:
     if args.command == "probe-selftest":
         return _run_probe_selftest(args)
     range_commands = ("run-local", "bisect-range")
+    progress = configure_progress(args.progress)
+    os.environ["PERF_BISECT_PROGRESS"] = args.progress
     output_dir = (args.work_dir if args.command in (*range_commands, "benchmark-commit") else args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.command in range_commands:
@@ -606,6 +623,12 @@ def main() -> int:
         plan = _load_plan(args.plan) if args.plan else _plan_from_benchmark_args(args)
     else:
         plan = _load_plan(args.plan)
+    progress.event(
+        "START",
+        f"{args.command} task={plan.task_id}/{plan.backend_key} "
+        f"runner={plan.runner.mode if plan.runner else 'unknown'}",
+    )
+    progress.event("TOOLING", "resolving pinned benchmark tooling", verbose_only=True)
     try:
         if plan.tooling is None:
             plan = resolve_tooling_plan(plan, _REPO_ROOT, tooling_ref=args.tooling_ref)
@@ -621,8 +644,15 @@ def main() -> int:
             },
         )
         write_status(output_dir, phase="tooling_setup", status="blocked", reason=exc.category)
+        progress.event("BLOCKED", f"tooling {exc.category}: {exc.detail}")
         print(f"[bisection_harness] TOOLING_BLOCKED={exc.category}: {exc.detail}", file=sys.stderr)
         return 2
+    tooling = plan.tooling
+    progress.event(
+        "TOOLING",
+        f"pinned at {(tooling.source_commit_sha or 'WORKTREE')[:12]} "
+        f"(spec={tooling.tooling_spec_hash or 'unversioned'})",
+    )
     write_json(output_dir / "plan.resolved.json", plan.to_json())
     if args.command in range_commands:
         write_json(
@@ -654,6 +684,7 @@ def main() -> int:
             bad_sha=candidate_payload["bad_sha"],
             metric=plan.metric.to_json(),
         )
+        progress.event("COMPLETE", f"resolved {candidate_payload['candidate_count']} candidates -> {output_dir}")
         print(f"[bisection_harness] candidates={candidate_payload['candidate_count']} -> {output_dir}")
         return 0
 
@@ -661,7 +692,17 @@ def main() -> int:
     probe_policy = _build_probe_policy(args)
     if args.command == "benchmark-commit":
         commit_sha = resolve_ref(_REPO_ROOT, args.commit)
-        write_measurement_preflight(output_dir, plan)
+        preflight = write_measurement_preflight(output_dir, plan)
+        if preflight is not None:
+            progress.event(
+                "PREFLIGHT",
+                f"{preflight.gpu.name or 'GPU unknown'}, runner={preflight.runner_mode}, "
+                f"{preflight.disk_free_gib:.1f} GiB free"
+                if preflight.disk_free_gib is not None
+                else f"{preflight.gpu.name or 'GPU unknown'}, runner={preflight.runner_mode}",
+            )
+            for warning in preflight.warnings:
+                progress.event("WARNING", warning)
         result = measure_commit(
             plan,
             output_dir,
@@ -698,6 +739,15 @@ def main() -> int:
             current_commit=commit_sha,
             metric=plan.metric.to_json(),
         )
+        if result.summary is not None:
+            progress.event(
+                "COMPLETE",
+                f"{commit_sha[:12]} median="
+                f"{format_metric(result.summary.median_value, plan.metric.unit)} "
+                f"spread={result.summary.spread_pct:.2f}% -> {output_dir}",
+            )
+        else:
+            progress.event("INCONCLUSIVE", f"{commit_sha[:12]}: {result.note or 'measurement failed'}")
         print(
             f"[bisection_harness] benchmark-commit status="
             f"{'completed' if result.succeeded else 'inconclusive'} commit={commit_sha[:12]}"
@@ -721,6 +771,14 @@ def main() -> int:
         last_good_commit=summary.last_good_commit,
         metric=summary.metric,
     )
+    if summary.status.startswith("completed"):
+        progress.event(
+            "COMPLETE",
+            f"first_bad={(summary.suspected_first_bad_commit or 'unknown')[:12]} "
+            f"last_good={(summary.last_good_commit or 'unknown')[:12]} -> {output_dir}",
+        )
+    else:
+        progress.event("INCONCLUSIVE", f"status={summary.status} reason={summary.reason} -> {output_dir}")
     print(
         "[bisection_harness] "
         f"status={summary.status} first_bad={summary.suspected_first_bad_commit} "

@@ -109,6 +109,28 @@ Preflight runs first and writes `preflight.json`: it records the host GPU
 the daemon is reachable and the base image is present. Mismatches/blockers are surfaced
 as warnings in `audit_log.jsonl` before any commit is measured.
 
+### Terminal progress
+
+Long-running workflows print compact progress to stderr by default while keeping
+the existing final status line on stdout. Progress includes preflight facts,
+reference qualification, each measured sample, candidate classification, recovery
+decisions, and a periodic heartbeat while a subprocess is active.
+
+Use `--progress verbose` to include structured candidate checkout and environment
+setup milestones. Raw package-manager, Docker, and benchmark output remains in the
+run artifacts so the terminal stays readable. Use `--progress quiet` for automation
+that does not want human-readable progress.
+
+```text
+[00:00] START       bisect-range task=Isaac-Cartpole-Direct/physx runner=docker-reconstruct
+[00:01] PREFLIGHT   NVIDIA L40S, runner=docker-reconstruct, 120.0 GiB free
+[00:02] GOOD REF    qualifying 1b79911fcbfd
+[04:31] RESULT      good_ref 1b79911fcbfd = 296,741.1 fps (269.2s)
+[15:42] SIGNAL      regression=30.09%, threshold=7.42%, reproduced=yes
+[31:08] CLASSIFY    979f461954be -> GOOD, 324,959.3 fps, regression=-9.51%
+[63:50] COMPLETE    first_bad=fcc8d462e8d... last_good=979f461954be...
+```
+
 ### 3. Inspect the results
 
 All artifacts land under `--work_dir`:

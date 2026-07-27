@@ -41,6 +41,7 @@ from .probe import (
     ProbeDecision,
     ProbePolicy,
 )
+from .progress import format_metric, get_progress_reporter
 from .recovery import (
     ACTION_ACCEPT,
     DeterministicRecoveryPolicy,
@@ -292,6 +293,7 @@ def _run_command(
     container/install/task friction before the process exits.
     """
     start = time.monotonic()
+    progress = get_progress_reporter()
     shell = isinstance(command, str)
     live_log = command_log.parent / "live_output.jsonl"
     command_log.parent.mkdir(parents=True, exist_ok=True)
@@ -339,6 +341,7 @@ def _run_command(
                     + "\n"
                 )
                 live_fh.flush()
+                progress.relay(line)
 
             while True:
                 if timeout_s is not None and time.monotonic() - start > timeout_s:
@@ -349,6 +352,7 @@ def _run_command(
                     line = key.fileobj.readline()
                     if line:
                         emit(line)
+                progress.heartbeat(f"subprocess active; details in {command_log}")
                 if process.poll() is not None:
                     remainder = process.stdout.read()
                     if remainder:
@@ -493,6 +497,13 @@ def _run_single_measurement(
     so a recovery retry does not clobber the failed attempt's evidence, and ``knobs``
     carries the recovery overrides applied to that retry.
     """
+    progress = get_progress_reporter()
+    retry_text = f", retry {recovery_attempt}" if recovery_attempt else ""
+    runner_mode = plan.runner.mode if plan.runner is not None else "unknown"
+    progress.event(
+        "MEASURE",
+        f"{label} {commit_sha[:12]} sample {run_idx}{retry_text} ({runner_mode})",
+    )
     artifact_dir = _measurement_artifact_dir(output_dir, label=label, commit_sha=commit_sha, plan=plan, run_idx=run_idx)
     if recovery_attempt:
         artifact_dir = artifact_dir.parent / f"{artifact_dir.name}_r{recovery_attempt}"
@@ -526,6 +537,7 @@ def _run_single_measurement(
             recovery_attempt=recovery_attempt,
             metric_value=None,
         )
+        progress.event("WARNING", f"{label} {commit_sha[:12]} stopped by probe: {probe_note}")
         return attempt, None
     command_log = artifact_dir / "bisect_command.log"
     timeout_s = plan.timeout.candidate_timeout_s
@@ -580,6 +592,24 @@ def _run_single_measurement(
         recovery_attempt=recovery_attempt,
         metric_value=metric_value,
     )
+    if metric_value is not None:
+        progress.event(
+            "RESULT",
+            f"{label} {commit_sha[:12]} = {format_metric(metric_value, plan.metric.unit)} ({duration_s:.1f}s)",
+        )
+        env = read_json_or_empty(artifact_dir / "bisect_env.json")
+        if env:
+            if env.get("env_dir"):
+                environment = f"environment={'reused' if env.get('env_reused') else 'fresh'}"
+            else:
+                environment = f"mode={env.get('mode', runner_mode)}"
+            progress.event(
+                "ENV",
+                f"{commit_sha[:12]} stack={env.get('stack_hash', 'unknown')} {environment}",
+                verbose_only=True,
+            )
+    else:
+        progress.event("WARNING", f"{label} {commit_sha[:12]} produced no metric: {note or 'unknown reason'}")
     return attempt, metric_value
 
 
@@ -891,6 +921,10 @@ def _measure_with_recovery(
             env_status=_read_bisect_env_status(Path(attempt.artifact_dir)),
         )
         decision = policy.decide(ctx)
+        get_progress_reporter().event(
+            "RECOVERY",
+            f"{label} {commit_sha[:12]}: {decision.action} ({decision.reason})",
+        )
         events.append(
             RecoveryEvent(
                 attempt=attempt_idx,
@@ -1292,15 +1326,31 @@ def run_local_bisection(
     :class:`~bisection.recovery.DeterministicRecoveryPolicy`.
     """
     policy = recovery_policy or DeterministicRecoveryPolicy()
+    progress = get_progress_reporter()
     candidate_payload = build_candidates(plan)
     candidates = list(candidate_payload["candidates"])
     write_json(output_dir / "candidates.json", candidate_payload)
     good_sha = candidate_payload["good_sha"]
     bad_sha = candidate_payload["bad_sha"]
+    progress.event(
+        "RANGE",
+        f"{good_sha[:12]} -> {bad_sha[:12]} ({len(candidates)} candidate commits, metric={plan.metric.name})",
+    )
 
     _write_preflight(output_dir, plan)
+    preflight = read_json_or_empty(output_dir / "preflight.json")
+    gpu = preflight.get("gpu", {})
+    gpu_name = gpu.get("name") if isinstance(gpu, dict) else None
+    disk_free = preflight.get("disk_free_gib")
+    facts = [gpu_name or "GPU unknown", f"runner={plan.runner.mode if plan.runner else 'unknown'}"]
+    if disk_free is not None:
+        facts.append(f"{disk_free:.1f} GiB free")
+    progress.event("PREFLIGHT", ", ".join(facts))
+    for warning in preflight.get("warnings", []):
+        progress.event("WARNING", str(warning))
 
     write_status(output_dir, phase="preflight", status="running", current_commit=good_sha, metric=plan.metric.to_json())
+    progress.event("GOOD REF", f"qualifying {good_sha[:12]}")
     good_measurement = measure_commit(
         plan,
         output_dir,
@@ -1335,8 +1385,13 @@ def run_local_bisection(
         )
         _write_summary(output_dir, plan, summary)
         return summary
+    progress.event(
+        "GOOD REF",
+        f"median={format_metric(good_summary.median_value, plan.metric.unit)}, spread={good_summary.spread_pct:.2f}%",
+    )
 
     write_status(output_dir, phase="preflight", status="running", current_commit=bad_sha, metric=plan.metric.to_json())
+    progress.event("BAD REF", f"qualifying {bad_sha[:12]}")
     bad_measurement = measure_commit(
         plan,
         output_dir,
@@ -1375,10 +1430,20 @@ def run_local_bisection(
         )
         _write_summary(output_dir, plan, summary)
         return summary
+    progress.event(
+        "BAD REF",
+        f"median={format_metric(bad_summary.median_value, plan.metric.unit)}, spread={bad_summary.spread_pct:.2f}%",
+    )
 
     reference_check = check_reference_signal(good_summary, bad_summary, plan.metric, plan.measurement)
     reference_stats["check"] = reference_check.to_json()
     write_json(output_dir / "reference_measurements.json", reference_stats)
+    progress.event(
+        "SIGNAL",
+        f"regression={reference_check.regression_pct:.2f}%, "
+        f"threshold={reference_check.effective_threshold_pct:.2f}%, "
+        f"reproduced={'yes' if reference_check.reproduced else 'no'}",
+    )
     if not reference_check.reproduced:
         # Emit measured facts only. ``state`` is the deterministic outcome of the reference
         # check (e.g. "local_regression_not_reproduced", "good_ref_measurements_too_noisy").
@@ -1419,6 +1484,10 @@ def run_local_bisection(
     def _evaluate(idx: int) -> tuple[str, str | None]:
         nonlocal completed
         commit_sha = candidates[idx]
+        progress.event(
+            "CANDIDATE",
+            f"test {completed + 1}/{min(max_tests, max(1, len(candidates) - 1))}: {commit_sha[:12]}",
+        )
         write_status(
             output_dir,
             phase="running",
@@ -1439,6 +1508,12 @@ def run_local_bisection(
             probe_policy=probe_policy,
         )
         write_json(result_dir / f"{commit_sha[:12]}.json", evaluation.to_json())
+        result_detail = evaluation.bisect_verdict
+        if evaluation.measured_value is not None:
+            result_detail += f", {format_metric(evaluation.measured_value, evaluation.metric_unit)}"
+        if evaluation.regression_pct is not None:
+            result_detail += f", regression={evaluation.regression_pct:.2f}%"
+        progress.event("CLASSIFY", f"{commit_sha[:12]} -> {result_detail}")
         completed += 1
         return evaluation.bisect_verdict, evaluation.note
 

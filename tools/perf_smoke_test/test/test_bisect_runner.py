@@ -14,6 +14,7 @@ a separate opt-in smoke test).
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import shlex
 import sys
@@ -41,6 +42,7 @@ from bisection.probe import (  # noqa: E402
     ProbeContext,
     ProbeDecision,
 )
+from bisection.progress import configure_progress  # noqa: E402
 
 
 @dataclass
@@ -286,6 +288,13 @@ class TestDockerReconstructCommand:
         env_extra = next(part for part in cmd if part.startswith("EXTRA_RUNNER_ARGS="))
         assert "--clear_caches" in env_extra
         assert "newton,isaacsim" in env_extra
+
+    def test_progress_mode_is_forwarded_into_container(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PERF_BISECT_PROGRESS", "verbose")
+
+        cmd = self._cmd(tmp_path)
+
+        assert "PERF_BISECT_PROGRESS=verbose" in cmd
 
     def test_multiword_arg_is_quoted_and_round_trips(self, tmp_path: Path) -> None:
         """A value with a space (e.g. ``--gpu_model 'NVIDIA L40S'``) must survive as one token.
@@ -752,6 +761,24 @@ class TestLiveCommandOutput:
         assert live_events[0]["event"] == "process_start"
         assert any(event.get("line") == "probe line" for event in live_events)
         assert live_events[-1]["event"] == "process_exit"
+
+    def test_run_command_relays_structured_progress_and_heartbeat(self, tmp_path: Path) -> None:
+        stream = io.StringIO()
+        reporter = configure_progress("verbose", stream=stream)
+        reporter.heartbeat_interval_s = 0
+
+        exit_code, _, _ = _run_command(
+            [sys.executable, "-c", "print('[perf-bisect] creating environment')"],
+            command_log=tmp_path / "bisect_command.log",
+            timeout_s=10,
+        )
+
+        assert exit_code == 0
+        output = stream.getvalue()
+        assert "SETUP" in output
+        assert "creating environment" in output
+        assert "RUNNING" in output
+        configure_progress("quiet")
 
     def test_runner_live_output_helper_writes_jsonl(self, tmp_path: Path) -> None:
         log_path = tmp_path / "bisect_command.log"

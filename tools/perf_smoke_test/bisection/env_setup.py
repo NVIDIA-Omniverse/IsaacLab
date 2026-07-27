@@ -64,6 +64,7 @@ except ImportError:  # pragma: no cover - fallback for namespace-package import
 #   - ``ov[ovrtx]``     -> ovrtx + ovphysx renderer bindings (``-i all`` excludes ``ov``)
 #   - ``isaacsim``      -> the pinned Isaac Sim itself (``install_isaacsim`` defaults off)
 DEFAULT_INSTALL_SCOPE = "newton,ov[ovrtx],isaacsim"
+_PROGRESS_PREFIX = "[perf-bisect]"
 
 # The bisection runner executes ``tools/perf_smoke_test/perf_runtime.py``, which
 # imports ``isaaclab.test.benchmark`` recorders. Some historical commits did not
@@ -85,6 +86,13 @@ _CORE_DIR = "source/isaaclab"
 _NEWTON_DIRS = ("source/isaaclab_newton", "source/isaaclab_physx")
 _OV_DIR = "source/isaaclab_ov"
 _OVPHYSX_DIR = "source/isaaclab_ovphysx"
+
+
+def _progress(message: str) -> None:
+    """Emit a structured environment-setup milestone in verbose mode."""
+    if os.environ.get("PERF_BISECT_PROGRESS") == "verbose":
+        print(f"{_PROGRESS_PREFIX} {message}", flush=True)
+
 
 # Install-log signatures that distinguish an unavailable pin from a build failure.
 _UNAVAILABLE_MARKERS = (
@@ -511,10 +519,12 @@ def ensure_env(
     python_path = env_dir / "bin" / "python"
     sentinel = env_dir / "built.ok"
     if force and env_dir.exists():
+        _progress(f"discarding cached environment for {stack.commit_sha[:12]}")
         shutil.rmtree(env_dir)
 
     can_reuse = sentinel.exists() and python_path.exists()
     if env_dir.exists() and not can_reuse:  # clear any partial build
+        _progress(f"removing incomplete environment for {stack.commit_sha[:12]}")
         shutil.rmtree(env_dir)
     env_dir.parent.mkdir(parents=True, exist_ok=True)
     log_path = root / "logs" / f"install-{stack.commit_sha[:12]}.log"
@@ -525,6 +535,7 @@ def ensure_env(
 
     def ensure_benchmark_support() -> None:
         """Install benchmark-only support into fresh or reused environments."""
+        _progress(f"installing benchmark support for {stack.commit_sha[:12]}")
         rc, out = _run_logged(
             _benchmark_support_install_command(python_path),
             cwd=source,
@@ -548,6 +559,7 @@ def ensure_env(
                 raise EnvSkip("install_failed", f"benchmark support project {project}: {_tail(out)}")
 
     def verify_imports() -> None:
+        _progress(f"verifying reconstructed imports for {stack.commit_sha[:12]}")
         rc, out = _run_logged(
             [
                 str(source / "isaaclab.sh"),
@@ -565,10 +577,13 @@ def ensure_env(
 
     interpreter = python_version or stack.python_version
     if sentinel.exists() and python_path.exists():
+        _progress(f"reusing environment {env_dir}")
         ensure_benchmark_support()
         verify_imports()
+        _progress(f"environment ready for {stack.commit_sha[:12]} (reused)")
         return EnvHandle(str(python_path), str(env_dir), stack.stack_hash, stack.isaacsim, reused=True)
 
+    _progress(f"creating Python {interpreter} environment for {stack.commit_sha[:12]}")
     rc, out = _run_logged(
         ["uv", "venv", str(env_dir), "--python", interpreter],
         cwd=source,
@@ -579,6 +594,7 @@ def ensure_env(
     if rc != 0:
         raise EnvSkip("install_failed", f"uv venv failed: {_tail(out)}")
 
+    _progress(f"installing pinned runtime stack for {stack.commit_sha[:12]}")
     rc, out = _run_logged(
         [str(source / "isaaclab.sh"), "-i", install_scope],
         cwd=source,
@@ -593,6 +609,7 @@ def ensure_env(
     verify_imports()
 
     sentinel.write_text("ok\n", encoding="utf-8")
+    _progress(f"environment ready for {stack.commit_sha[:12]} (fresh)")
     return EnvHandle(str(python_path), str(env_dir), stack.stack_hash, stack.isaacsim, reused=False)
 
 
