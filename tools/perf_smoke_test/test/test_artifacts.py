@@ -78,6 +78,29 @@ def test_attempt_summary_classifies_disk_full_install_failure(tmp_path: Path) ->
     assert "attempt_summary" in summary["paths"]
 
 
+def test_attempt_summary_indexes_separate_docker_logs(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "measurements" / "benchmark" / "abc123" / "task" / "physx" / "run_1"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "docker_command.log").write_text("docker text\n", encoding="utf-8")
+    (artifact_dir / "docker_live_output.jsonl").write_text('{"event": "process_exit"}\n', encoding="utf-8")
+
+    summary = write_attempt_summary(
+        tmp_path,
+        plan=_plan(),
+        attempt=_attempt(artifact_dir, ""),
+        commit_sha="abc123def4567890",
+        label="benchmark",
+        run_idx=1,
+        recovery_attempt=0,
+        metric_value=123.0,
+    )
+
+    assert summary["paths"]["docker_command_log"].endswith("docker_command.log")
+    assert summary["paths"]["docker_live_output"].endswith("docker_live_output.jsonl")
+    assert summary["evidence"]["docker_command_log_tail"] == "docker text\n"
+    assert summary["evidence"]["docker_live_output_tail"] == '{"event": "process_exit"}\n'
+
+
 def test_attempt_summary_classifies_missing_module_runtime_failure(tmp_path: Path) -> None:
     artifact_dir = tmp_path / "measurements" / "good_ref" / "abc123" / "task" / "newton" / "run_1"
     artifact_dir.mkdir(parents=True)

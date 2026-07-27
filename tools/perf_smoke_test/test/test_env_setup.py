@@ -270,10 +270,16 @@ class TestInstallFailureClassification:
         tuned = with_uv_download_tuning({"PATH": "/usr/bin"}, cache_root=tmp_path)
         assert tuned["PATH"] == "/usr/bin"
         assert tuned["UV_CACHE_DIR"] == str(tmp_path / "uv-cache")
+        assert tuned["UV_PYTHON_INSTALL_DIR"] == str(tmp_path / "uv-python")
         assert int(tuned["UV_HTTP_TIMEOUT"]) >= 300
 
     def test_uv_download_tuning_respects_caller_overrides(self, tmp_path: Path) -> None:
-        env = {"UV_CACHE_DIR": "/custom/cache", "UV_HTTP_TIMEOUT": "42"}
+        env = {
+            "UV_CACHE_DIR": "/custom/cache",
+            "UV_PYTHON_INSTALL_DIR": "/custom/python",
+            "UV_HTTP_TIMEOUT": "42",
+        }
         tuned = with_uv_download_tuning(env, cache_root=tmp_path)
         assert tuned["UV_CACHE_DIR"] == "/custom/cache"
+        assert tuned["UV_PYTHON_INSTALL_DIR"] == "/custom/python"
         assert tuned["UV_HTTP_TIMEOUT"] == "42"

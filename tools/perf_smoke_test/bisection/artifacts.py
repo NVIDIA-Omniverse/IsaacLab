@@ -114,6 +114,8 @@ def _attempt_files(artifact_dir: Path, output_dir: Path, commit_sha: str) -> dic
         "benchmark_log": artifact_dir / "benchmark.log",
         "bisect_command_log": artifact_dir / "bisect_command.log",
         "live_output": artifact_dir / "live_output.jsonl",
+        "docker_command_log": artifact_dir / "docker_command.log",
+        "docker_live_output": artifact_dir / "docker_live_output.jsonl",
         "perf_smoke_test_result": artifact_dir / "perf_smoke_test_result.json",
         "perf_smoke_test_info": artifact_dir / "perf_smoke_test_info.json",
         "tooling_capability": artifact_dir / "tooling_capability.json",
@@ -199,6 +201,8 @@ def write_attempt_summary(
             "benchmark_log_tail": _read_tail(artifact_dir / "benchmark.log"),
             "bisect_command_log_tail": _read_tail(artifact_dir / "bisect_command.log"),
             "live_output_tail": _read_tail(artifact_dir / "live_output.jsonl"),
+            "docker_command_log_tail": _read_tail(artifact_dir / "docker_command.log"),
+            "docker_live_output_tail": _read_tail(artifact_dir / "docker_live_output.jsonl"),
             "probe_live_output_tail": _read_tail(artifact_dir / "probe" / "live_output.jsonl"),
         },
     }

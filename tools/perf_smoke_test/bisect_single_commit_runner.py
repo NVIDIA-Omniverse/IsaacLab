@@ -401,11 +401,12 @@ def _run(cmd: list[str], *, cwd: Path | None = None, check: bool = True, env: di
     return result
 
 
-def _run_with_live_output(cmd: list[str], *, cwd: Path, log_path: Path) -> int:
-    """Run a command, teeing output to ``log_path`` and ``live_output.jsonl``."""
+def _run_with_live_output(cmd: list[str], *, cwd: Path, log_path: Path, live_path: Path | None = None) -> int:
+    """Run a command, teeing output to separate text and JSONL paths."""
     start = time.monotonic()
-    live_path = log_path.parent / "live_output.jsonl"
+    live_path = live_path or log_path.parent / "live_output.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    live_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_fh, live_path.open("w", encoding="utf-8") as live_fh:
         log_fh.write(f"$ {' '.join(shlex.quote(part) for part in cmd)}\n\n")
         log_fh.flush()
@@ -1186,7 +1187,12 @@ def _run_docker_reconstruct(args: argparse.Namespace, *, commit_sha: str, task, 
     )
     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True)
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    return _run_with_live_output(cmd, cwd=_REPO_ROOT, log_path=artifact_dir / "bisect_command.log")
+    return _run_with_live_output(
+        cmd,
+        cwd=_REPO_ROOT,
+        log_path=artifact_dir / "docker_command.log",
+        live_path=artifact_dir / "docker_live_output.jsonl",
+    )
 
 
 def _write_bisect_env(

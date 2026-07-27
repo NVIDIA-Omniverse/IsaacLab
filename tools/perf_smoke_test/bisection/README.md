@@ -145,7 +145,7 @@ All artifacts land under `--work_dir`:
 | `blockers.json` | Structured, categorized blockers with suggested next steps. |
 | `artifact_index.json` | Role-based index of every artifact and attempt. |
 | `audit_log.jsonl` | Ordered event log (measurements, warmups, recovery, warnings). |
-| `measurements/<label>/<sha>/…` | Per-attempt logs and `perf_smoke_test_result.json`. |
+| `measurements/<label>/<sha>/…` | Per-attempt engine logs, separate Docker logs, and benchmark results. |
 | `results/<sha>.json` | Canonical evaluation for each binary-search candidate. |
 | `warmup_state.json` | Successful one-per-commit warmups and their stack/tooling identity. |
 
@@ -158,8 +158,8 @@ The `docker run` invocation mounts:
 - `/candidate` — the per-commit source clone the runner checks out and installs editable.
 - `/artifacts` — this candidate's artifacts (logs and result).
 - `/env-cache` — the **run-scoped, shared** `uv` env cache. Heavy wheels (Isaac Sim,
-  Newton, …) are downloaded once and hardlinked/copied across commits, so only the
-  first build of a given pinned stack pays the full download cost.
+  Newton, …) and uv-managed Python interpreters persist across ephemeral containers.
+  Only the first build of a given pinned stack pays the full environment setup cost.
 - `/cache/jit-root` and `/cache/kit-root` — run-scoped cache roots. The inner
   runner selects a `stack_hash` subdirectory shared by warmup and measured attempts.
 

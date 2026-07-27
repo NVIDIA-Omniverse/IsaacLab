@@ -454,22 +454,26 @@ def with_omniverse_eula_acceptance(env: dict[str, str]) -> dict[str, str]:
 def with_uv_download_tuning(env: dict[str, str], *, cache_root: Path) -> dict[str, str]:
     """Return ``env`` tuned so heavy Isaac Sim/CUDA wheel downloads are robust and reused.
 
-    Two settings, both important for per-commit reconstruction:
+    Three settings, all important for per-commit reconstruction:
 
     * ``UV_CACHE_DIR`` is pinned under the shared env-cache root so the multi-GB
       Isaac Sim/CUDA wheels download once and are reused across commits. This
       matters most for ``docker-reconstruct``, where each candidate runs in a
       ``--rm`` container whose default ``~/.cache/uv`` would be discarded, forcing
       a full re-download (and re-exposing download flakiness) every commit.
+    * ``UV_PYTHON_INSTALL_DIR`` keeps uv-managed interpreters under the same shared
+      root. Otherwise a Docker-created venv links to ``~/.local/share/uv/python``
+      inside the ephemeral container and becomes unusable when that container exits.
     * ``UV_HTTP_TIMEOUT`` is raised because some CUDA wheels (e.g. the aarch64
       ``nvidia-cusolver`` build) are large enough to exceed uv's short default
       request timeout on slower mirrors, which otherwise surfaces as a spurious
       ``install_failed``.
 
-    Existing values in ``env`` win, so a caller can still override either.
+    Existing values in ``env`` win, so a caller can still override any setting.
     """
     tuned = dict(env)
     tuned.setdefault("UV_CACHE_DIR", str(Path(cache_root) / "uv-cache"))
+    tuned.setdefault("UV_PYTHON_INSTALL_DIR", str(Path(cache_root) / "uv-python"))
     tuned.setdefault("UV_HTTP_TIMEOUT", "600")
     return tuned
 

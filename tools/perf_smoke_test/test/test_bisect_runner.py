@@ -296,6 +296,39 @@ class TestDockerReconstructCommand:
 
         assert "PERF_BISECT_PROGRESS=verbose" in cmd
 
+    def test_docker_capture_uses_separate_artifact_paths(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, Path] = {}
+        args = argparse.Namespace(
+            image="isaaclab-bisect:base",
+            harness_root=tmp_path / "harness",
+            tooling_root=tmp_path / "tooling",
+            source_dir=tmp_path / "candidate",
+            env_cache_dir=tmp_path / "env-cache",
+            jit_cache=tmp_path / "jit-cache",
+            kit_cache=tmp_path / "kit-cache",
+            task_id="Isaac-Cartpole-Direct",
+            backend_key="physx",
+        )
+        task = argparse.Namespace(task_id=args.task_id, backend_key=args.backend_key)
+        artifact_dir = tmp_path / "artifacts"
+
+        monkeypatch.setattr(runner, "_docker_reconstruct_extra_args", lambda _args: [])
+        monkeypatch.setattr(runner, "_docker_reconstruct_command", lambda **_kwargs: ["docker", "run"])
+        monkeypatch.setattr(runner.subprocess, "run", lambda *_args, **_kwargs: None)
+
+        def fake_run_with_live_output(cmd, *, cwd, log_path, live_path):
+            captured["log_path"] = log_path
+            captured["live_path"] = live_path
+            return 0
+
+        monkeypatch.setattr(runner, "_run_with_live_output", fake_run_with_live_output)
+
+        assert (
+            runner._run_docker_reconstruct(args, commit_sha="abc123def456", task=task, artifact_dir=artifact_dir) == 0
+        )
+        assert captured["log_path"] == artifact_dir / "docker_command.log"
+        assert captured["live_path"] == artifact_dir / "docker_live_output.jsonl"
+
     def test_multiword_arg_is_quoted_and_round_trips(self, tmp_path: Path) -> None:
         """A value with a space (e.g. ``--gpu_model 'NVIDIA L40S'``) must survive as one token.
 
@@ -792,6 +825,31 @@ class TestLiveCommandOutput:
         assert "container line" in log_path.read_text(encoding="utf-8")
         events = [
             json.loads(line) for line in (tmp_path / "live_output.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert events[0]["event"] == "process_start"
+        assert any(event.get("line") == "container line" for event in events)
+        assert events[-1]["event"] == "process_exit"
+
+    def test_runner_live_output_helper_preserves_engine_logs(self, tmp_path: Path) -> None:
+        engine_log = tmp_path / "bisect_command.log"
+        engine_live = tmp_path / "live_output.jsonl"
+        engine_log.write_text("engine text\n", encoding="utf-8")
+        engine_live.write_text('{"event": "engine"}\n', encoding="utf-8")
+
+        exit_code = runner._run_with_live_output(
+            [sys.executable, "-c", "print('container line')"],
+            cwd=tmp_path,
+            log_path=tmp_path / "docker_command.log",
+            live_path=tmp_path / "docker_live_output.jsonl",
+        )
+
+        assert exit_code == 0
+        assert engine_log.read_text(encoding="utf-8") == "engine text\n"
+        assert engine_live.read_text(encoding="utf-8") == '{"event": "engine"}\n'
+        assert "container line" in (tmp_path / "docker_command.log").read_text(encoding="utf-8")
+        events = [
+            json.loads(line)
+            for line in (tmp_path / "docker_live_output.jsonl").read_text(encoding="utf-8").splitlines()
         ]
         assert events[0]["event"] == "process_start"
         assert any(event.get("line") == "container line" for event in events)
