@@ -1,0 +1,38 @@
+{
+  "_comment": "Golden correctness tasks (sibling of tasks.json). KPI thresholds ship as reporting-only (threshold_verdict=null) until calibrated via the offline sweep and blessed by CODEOWNERS; the golden gate is advisory (gate_config.golden_blocking=false) regardless. checkpoint.path is relative to a baked golden-checkpoint root; the orchestration resolves it to an absolute local path via golden_config.resolve_checkpoint_path(golden_root) and passes it to golden_runtime.py --checkpoint (never fetched over the network on the runner). {task_id} and {backend_key} in checkpoint id/path are expanded per backend at load time.",
+  "defaults": {
+    "type": "golden",
+    "runs_on": "gpu-l40s",
+    "preset": "default",
+    "rl_library": "rsl_rl",
+    "agent": "rsl_rl_cfg_entry_point",
+    "num_envs": 64,
+    "eval_steps": 500,
+    "seed": 42,
+    "deterministic": true,
+    "timeout_minutes": 10,
+    "tags": ["always"]
+  },
+  "tasks": [
+    {
+      "task_id": "Isaac-Cartpole-Direct",
+      "checkpoint": {
+        "id": "cartpole-{backend_key}-v1",
+        "path": "Isaac-Cartpole-Direct/{backend_key}/policy.pt"
+      },
+      "backends": [
+        {"physics": "physx"},
+        {"physics": "newton"}
+      ],
+      "kpis": {
+        "reward": [
+          {"threshold_name": "reward-floor", "threshold": 0.0, "threshold_verdict": null}
+        ],
+        "ep_length": [
+          {"threshold_name": "survival-floor", "threshold": 0.0, "threshold_verdict": null}
+        ],
+        "success_rate": []
+      }
+    }
+  ]
+}
