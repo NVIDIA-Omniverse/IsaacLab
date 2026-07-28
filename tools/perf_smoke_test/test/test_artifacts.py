@@ -387,3 +387,145 @@ def test_report_renders_component_stack_diff(tmp_path: Path) -> None:
     assert "Component Stack Diff" in report
     assert "`newton`" in report
     assert "==1.2.1" in report and "==1.3.0" in report
+
+
+def test_report_renders_decision_evidence_and_sampling_confidence(tmp_path: Path) -> None:
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+    (results_dir / "abc123def456.json").write_text(
+        json.dumps(
+            {
+                "commit_sha": "abc123def4567890",
+                "bisect_verdict": "GOOD",
+                "measured_value": 1020.0,
+                "baseline_value": 1000.0,
+                "regression_pct": -2.0,
+                "attempt_count": 1,
+                "metric_unit": "fps",
+                "threshold_source": "paired_reference",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (results_dir / "def456abc123.json").write_text(
+        json.dumps(
+            {
+                "commit_sha": "def456abc1237890",
+                "bisect_verdict": "BAD",
+                "measured_value": 800.0,
+                "baseline_value": 1000.0,
+                "regression_pct": 20.0,
+                "attempt_count": 2,
+                "metric_unit": "fps",
+                "threshold_source": "paired_reference",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    plan = {
+        **_plan(),
+        "measurement": {
+            "reference_runs": 3,
+            "max_reference_runs": 7,
+            "candidate_runs": 1,
+            "max_candidate_runs": 3,
+            "warmup_runs": 1,
+        },
+    }
+    enriched = finalize_run_artifacts(
+        tmp_path,
+        plan,
+        {
+            "status": "completed",
+            "reason": "first_bad_found",
+            "good_ref": "good",
+            "bad_ref": "bad",
+            "suspected_first_bad_commit": "def456abc1237890",
+            "last_good_commit": "abc123def4567890",
+            "metric": {"name": "raw_fps_mean", "unit": "fps", "regression_direction": "decrease"},
+            "reference_stats": {
+                "good": {
+                    "median_value": 1000.0,
+                    "sample_count": 3,
+                    "spread_pct": 1.2,
+                    "metric_name": "raw_fps_mean",
+                    "unit": "fps",
+                    "values": [995.0, 1000.0, 1005.0],
+                },
+                "bad": {
+                    "median_value": 800.0,
+                    "sample_count": 3,
+                    "spread_pct": 1.5,
+                    "metric_name": "raw_fps_mean",
+                    "unit": "fps",
+                    "values": [795.0, 800.0, 805.0],
+                },
+                "check": {
+                    "reproduced": True,
+                    "regression_pct": 20.0,
+                    "effective_threshold_pct": 5.0,
+                    "reference_noise_pct": 1.0,
+                    "note": None,
+                },
+            },
+            "tested_commits": ["abc123def4567890", "def456abc1237890"],
+            "skipped_commits": [],
+        },
+    )
+
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "Decision Evidence" in report
+    assert "Good reference: 1,000.0 fps (3 samples, 1.20% spread)" in report
+    assert "Endpoint regression: 20.00% vs 5.00% threshold" in report
+    assert "Last good `abc123def456`" in report and "`GOOD`" in report
+    assert "First bad `def456abc123`" in report and "`BAD`" in report
+    assert "Confidence: **nominal**" in report
+    assert enriched["decision_evidence"]["sampling"]["confidence"] == "nominal"
+
+
+def test_report_flags_single_sample_without_warmup_as_limited(tmp_path: Path) -> None:
+    plan = {
+        **_plan(),
+        "measurement": {
+            "reference_runs": 1,
+            "max_reference_runs": 1,
+            "candidate_runs": 1,
+            "max_candidate_runs": 1,
+            "warmup_runs": 0,
+        },
+    }
+    enriched = finalize_run_artifacts(
+        tmp_path,
+        plan,
+        {
+            "status": "inconclusive",
+            "reason": "regression_not_reproduced",
+            "good_ref": "good",
+            "bad_ref": "bad",
+            "suspected_first_bad_commit": None,
+            "last_good_commit": None,
+            "metric": {"name": "raw_fps_mean", "unit": "fps", "regression_direction": "decrease"},
+            "reference_stats": {
+                "good": {"median_value": 1000.0, "sample_count": 1, "spread_pct": 0.0, "unit": "fps"},
+                "bad": {"median_value": 980.0, "sample_count": 1, "spread_pct": 0.0, "unit": "fps"},
+                "check": {
+                    "reproduced": False,
+                    "regression_pct": 2.0,
+                    "effective_threshold_pct": 5.0,
+                    "reference_noise_pct": 0.0,
+                    "note": None,
+                },
+            },
+            "tested_commits": [],
+            "skipped_commits": [],
+        },
+    )
+
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "1 sample, spread not estimable" in report
+    assert "Confidence: **limited**" in report
+    assert "reference noise is not estimable from a single sample" in report
+    assert "process warmup was disabled" in report
+    assert enriched["decision_evidence"]["sampling"]["confidence"] == "limited"

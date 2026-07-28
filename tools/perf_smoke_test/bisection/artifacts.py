@@ -636,6 +636,159 @@ def _stack_diff_lines(stack_diff: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _candidate_decision(output_dir: Path, commit_sha: str | None) -> dict[str, Any] | None:
+    """Return the report-facing fields for one classified boundary commit."""
+    if not commit_sha:
+        return None
+    payload = _read_json(output_dir / "results" / f"{commit_sha[:12]}.json")
+    if not payload:
+        return None
+    return {
+        key: payload.get(key)
+        for key in (
+            "commit_sha",
+            "bisect_verdict",
+            "measured_value",
+            "baseline_value",
+            "regression_pct",
+            "attempt_count",
+            "metric_unit",
+            "threshold_source",
+        )
+    }
+
+
+def _decision_evidence(output_dir: Path, plan: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    """Build compact decision evidence for human and machine-readable handoff."""
+    stats = summary.get("reference_stats") or {}
+    check = stats.get("check") or {}
+    references = {
+        label: {
+            key: values.get(key)
+            for key in ("median_value", "sample_count", "spread_pct", "metric_name", "unit", "values")
+        }
+        for label, values in (("good", stats.get("good") or {}), ("bad", stats.get("bad") or {}))
+        if values
+    }
+    measurement = plan.get("measurement") or {}
+    sample_counts = [
+        int(values.get("sample_count") or 0) for values in references.values() if values.get("sample_count") is not None
+    ]
+    limitations: list[str] = []
+    if sample_counts and min(sample_counts) < 2:
+        limitations.append("reference noise is not estimable from a single sample")
+    warmup_runs = measurement.get("warmup_runs")
+    if warmup_runs is not None and int(warmup_runs) < 1:
+        limitations.append("process warmup was disabled")
+
+    check_evidence = {
+        key: check.get(key)
+        for key in ("reproduced", "regression_pct", "effective_threshold_pct", "reference_noise_pct", "note")
+    }
+    boundary = {
+        "last_good": _candidate_decision(output_dir, summary.get("last_good_commit")),
+        "first_bad": _candidate_decision(output_dir, summary.get("suspected_first_bad_commit")),
+    }
+    if (
+        not references
+        and not any(value is not None for value in check_evidence.values())
+        and not any(boundary.values())
+    ):
+        return {}
+
+    return {
+        "metric": summary.get("metric") or plan.get("metric") or {},
+        "references": references,
+        "check": check_evidence,
+        "boundary": boundary,
+        "sampling": {
+            "reference_runs": measurement.get("reference_runs"),
+            "max_reference_runs": measurement.get("max_reference_runs"),
+            "candidate_runs": measurement.get("candidate_runs"),
+            "max_candidate_runs": measurement.get("max_candidate_runs"),
+            "warmup_runs": warmup_runs,
+            "confidence": "limited" if limitations else "nominal",
+            "limitations": limitations,
+        },
+    }
+
+
+def _format_report_metric(value: Any, unit: str | None) -> str:
+    """Format one report metric while tolerating absent or malformed values."""
+    if not isinstance(value, int | float):
+        return "unavailable"
+    rendered = f"{float(value):,.1f}"
+    return f"{rendered} {unit}" if unit else rendered
+
+
+def _decision_evidence_lines(evidence: dict[str, Any] | None) -> list[str]:
+    """Render reference qualification, boundary decisions, and sampling confidence."""
+    if not evidence:
+        return []
+    metric = evidence.get("metric") or {}
+    unit = metric.get("unit")
+    references = evidence.get("references") or {}
+    check = evidence.get("check") or {}
+    lines = [
+        "## Decision Evidence",
+        "",
+        f"- Metric: `{metric.get('name') or metric.get('result_path')}`"
+        f" ({metric.get('regression_direction', 'decrease')} is worse)",
+    ]
+    for label, title in (("good", "Good reference"), ("bad", "Bad reference")):
+        values = references.get(label) or {}
+        if not values:
+            continue
+        sample_count = int(values.get("sample_count") or 0)
+        spread = (
+            f"{float(values['spread_pct']):.2f}% spread"
+            if sample_count > 1 and isinstance(values.get("spread_pct"), int | float)
+            else "spread not estimable"
+        )
+        lines.append(
+            f"- {title}: {_format_report_metric(values.get('median_value'), values.get('unit') or unit)} "
+            f"({sample_count} sample{'s' if sample_count != 1 else ''}, {spread})"
+        )
+    if check.get("regression_pct") is not None:
+        lines.append(
+            f"- Endpoint regression: {float(check['regression_pct']):.2f}% vs "
+            f"{float(check.get('effective_threshold_pct') or 0.0):.2f}% threshold "
+            f"(reproduced: {'yes' if check.get('reproduced') else 'no'})"
+        )
+
+    boundary = evidence.get("boundary") or {}
+    if any(boundary.values()):
+        lines.extend(["", "### Culprit Boundary", ""])
+        for key, title in (("last_good", "Last good"), ("first_bad", "First bad")):
+            decision = boundary.get(key)
+            if not decision:
+                continue
+            regression = decision.get("regression_pct")
+            regression_text = f", {float(regression):+.2f}% vs good ref" if regression is not None else ""
+            lines.append(
+                f"- {title} `{str(decision.get('commit_sha') or '')[:12]}`: "
+                f"{_format_report_metric(decision.get('measured_value'), decision.get('metric_unit') or unit)}, "
+                f"`{decision.get('bisect_verdict')}`{regression_text}, "
+                f"{int(decision.get('attempt_count') or 0)} measured attempt(s)"
+            )
+
+    sampling = evidence.get("sampling") or {}
+    limitations = sampling.get("limitations") or []
+    lines.extend(["", "### Measurement Confidence", ""])
+    if limitations:
+        lines.append(f"- Confidence: **limited** — {'; '.join(limitations)}.")
+    else:
+        lines.append("- Confidence: **nominal** — reference noise was sampled and process warmup was enabled.")
+    if sampling.get("reference_runs") is not None:
+        lines.append(
+            f"- Policy: {sampling.get('reference_runs')} reference run(s), "
+            f"up to {sampling.get('max_reference_runs')}; {sampling.get('candidate_runs')} candidate run(s), "
+            f"up to {sampling.get('max_candidate_runs')}; {sampling.get('warmup_runs')} process warmup run(s)."
+        )
+    lines.append("")
+    return lines
+
+
 def _report_lines(summary: dict[str, Any], terminal_blocker: dict[str, Any] | None) -> list[str]:
     lines = [
         "# Bisection Run Report",
@@ -648,6 +801,7 @@ def _report_lines(summary: dict[str, Any], terminal_blocker: dict[str, Any] | No
         f"- Last good: `{summary.get('last_good_commit')}`",
         "",
     ]
+    lines.extend(_decision_evidence_lines(summary.get("decision_evidence")))
     lines.extend(_stack_diff_lines(summary.get("stack_diff")))
     if terminal_blocker:
         attempt = terminal_blocker.get("attempt", {})
@@ -725,6 +879,7 @@ def finalize_run_artifacts(output_dir: Path, plan: dict[str, Any], summary: dict
 
     enriched = {
         **summary,
+        "decision_evidence": _decision_evidence(output_dir, plan, summary),
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
         "run_manifest": "run_manifest.json",
         "artifact_index": "artifact_index.json",

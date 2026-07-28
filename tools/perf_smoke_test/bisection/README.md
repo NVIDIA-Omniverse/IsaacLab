@@ -121,6 +121,12 @@ setup milestones. Raw package-manager, Docker, and benchmark output remains in t
 run artifacts so the terminal stays readable. Use `--progress quiet` for automation
 that does not want human-readable progress.
 
+Production defaults use one process warmup and three reference samples so reference
+noise can be estimated. Explicitly selecting `--warmup_runs 0` or
+`--reference_runs 1` prints a confidence warning and is intended only for controlled
+smoke tests or cold-start investigations. The final report records the effective
+sampling policy and labels single-sample evidence as limited confidence.
+
 ```text
 [00:00] START       bisect-range task=Isaac-Cartpole-Direct/physx runner=docker-reconstruct
 [00:01] PREFLIGHT   NVIDIA L40S, runner=docker-reconstruct, 120.0 GiB free

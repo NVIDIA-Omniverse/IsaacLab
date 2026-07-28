@@ -46,6 +46,20 @@ def _add_progress_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _sampling_warnings(plan: BisectionPlan) -> list[str]:
+    """Return operator warnings for deliberately low-confidence sampling policies."""
+    warnings: list[str] = []
+    if plan.measurement.reference_runs < 2:
+        warnings.append(
+            "reference_runs=1 cannot estimate reference noise; use the default 3 or more for natural regressions"
+        )
+    if plan.measurement.warmup_runs < 1:
+        warnings.append(
+            "warmup_runs=0 includes cold-start effects; use the default process warmup for steady-state results"
+        )
+    return warnings
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="IsaacLab performance bisection harness.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -628,6 +642,9 @@ def main() -> int:
         f"{args.command} task={plan.task_id}/{plan.backend_key} "
         f"runner={plan.runner.mode if plan.runner else 'unknown'}",
     )
+    if args.command in range_commands:
+        for warning in _sampling_warnings(plan):
+            progress.event("WARNING", warning)
     progress.event("TOOLING", "resolving pinned benchmark tooling", verbose_only=True)
     try:
         if plan.tooling is None:

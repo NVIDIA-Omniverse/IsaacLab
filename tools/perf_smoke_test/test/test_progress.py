@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 _GATE_DIR = Path(__file__).resolve().parents[1]
@@ -16,7 +17,9 @@ if str(_GATE_DIR) not in sys.path:
     sys.path.insert(0, str(_GATE_DIR))
 
 from bisection.env_setup import _progress as emit_environment_progress  # noqa: E402
+from bisection.models import BisectionPlan, RunnerSpec  # noqa: E402
 from bisection.progress import ProgressReporter, configure_progress, format_metric  # noqa: E402
+from bisection_harness import _sampling_warnings  # noqa: E402
 
 
 def test_quiet_progress_emits_nothing() -> None:
@@ -86,3 +89,25 @@ def test_environment_setup_milestones_require_verbose_mode(monkeypatch, capsys) 
     monkeypatch.setenv("PERF_BISECT_PROGRESS", "verbose")
     emit_environment_progress("creating environment")
     assert capsys.readouterr().out == "[perf-bisect] creating environment\n"
+
+
+def test_sampling_warnings_distinguish_defaults_from_smoke_overrides() -> None:
+    plan = BisectionPlan(
+        task_id="Isaac-Cartpole-Direct",
+        backend_key="physx",
+        good_ref="good",
+        bad_ref="bad",
+        gpu_model="NVIDIA L40S",
+        runner=RunnerSpec(mode="synthetic"),
+    )
+    assert plan.measurement.reference_runs == 3
+    assert plan.measurement.warmup_runs == 1
+    assert _sampling_warnings(plan) == []
+
+    low_confidence = replace(
+        plan,
+        measurement=replace(plan.measurement, reference_runs=1, max_reference_runs=1, warmup_runs=0),
+    )
+    warnings = _sampling_warnings(low_confidence)
+    assert any("cannot estimate reference noise" in warning for warning in warnings)
+    assert any("cold-start effects" in warning for warning in warnings)
