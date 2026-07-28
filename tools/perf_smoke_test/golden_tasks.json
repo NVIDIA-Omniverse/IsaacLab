@@ -1,12 +1,12 @@
 {
-  "_comment": "Golden correctness tasks (sibling of tasks.json). KPI thresholds ship as reporting-only (threshold_verdict=null) until calibrated via the offline sweep and blessed by CODEOWNERS; the golden gate is advisory (gate_config.golden_blocking=false) regardless. checkpoint.path is relative to a baked golden-checkpoint root; the orchestration resolves it to an absolute local path via golden_config.resolve_checkpoint_path(golden_root) and passes it to golden_runtime.py --checkpoint (never fetched over the network on the runner). {task_id} and {backend_key} in checkpoint id/path are expanded per backend at load time.",
+  "_comment": "TEST-BRANCH TRIM (angehu-test/golden-ci-dryrun): Cartpole/physx only, paired with the perf Cartpole/physx cell. The checkpoint is a real rsl_rl policy pulled from a fork release asset (see the 'Golden - pull checkpoint (TEST)' workflow step) and loaded via the real --checkpoint path. KPI thresholds stay reporting-only (advisory). Not for merge.",
   "defaults": {
     "type": "golden",
     "runs_on": "gpu-l40s",
     "preset": "default",
     "rl_library": "rsl_rl",
     "agent": "rsl_rl_cfg_entry_point",
-    "num_envs": 64,
+    "num_envs": 128,
     "eval_steps": 500,
     "seed": 42,
     "deterministic": true,
@@ -17,12 +17,11 @@
     {
       "task_id": "Isaac-Cartpole-Direct",
       "checkpoint": {
-        "id": "cartpole-{backend_key}-v1",
+        "id": "cartpole-{backend_key}-testdummy",
         "path": "Isaac-Cartpole-Direct/{backend_key}/policy.pt"
       },
       "backends": [
-        {"physics": "physx"},
-        {"physics": "newton"}
+        {"physics": "physx"}
       ],
       "kpis": {
         "reward": [

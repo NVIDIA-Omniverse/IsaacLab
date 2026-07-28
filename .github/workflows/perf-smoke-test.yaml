@@ -626,12 +626,38 @@ jobs:
     # a dirty GPU. Golden scoring/reporting happens in the separate golden_aggregate
     # job (advisory, ubuntu-latest).
     # =========================================================================
+    # TEST-ONLY (angehu-test/golden-ci-dryrun): pull the dummy golden checkpoint (a
+    # real rsl_rl policy) from a fork release asset into the workspace GOLDEN_ROOT, so
+    # the real --checkpoint resolve+load path is exercised and TIMED. Production bakes
+    # the checkpoint into the image instead (this step + the GOLDEN_ROOT override below
+    # do not merge).
+    - name: Golden — pull checkpoint (TEST)
+      id: golden_pull
+      if: ${{ always() && matrix.golden_present == 'true' }}
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GOLDEN_ROOT: ${{ github.workspace }}/golden-checkpoints
+        RELPATH: ${{ matrix.golden_checkpoint_relpath }}
+        RELEASE_TAG: angehu-test-golden-ckpt
+        ASSET: cartpole-physx-policy.pt
+      run: |
+        set -uo pipefail
+        dest="${GOLDEN_ROOT%/}/${RELPATH}"
+        mkdir -p "$(dirname "${dest}")"
+        start_ns=$(date +%s%N)
+        gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${ASSET}" --output "${dest}" --clobber
+        pull_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
+        bytes=$(stat -c%s "${dest}" 2>/dev/null || echo 0)
+        echo "pull_ms=${pull_ms}" >> "${GITHUB_OUTPUT}"
+        echo "::notice::Golden checkpoint pull: ${pull_ms} ms, ${bytes} bytes -> ${dest}"
+
     - name: Golden — resolve checkpoint + GPU clean
       id: golden_gpu
       if: ${{ always() && matrix.golden_present == 'true' }}
       continue-on-error: true
       env:
-        GOLDEN_ROOT: ${{ vars.PERF_SMOKE_GOLDEN_ROOT }}
+        GOLDEN_ROOT: ${{ github.workspace }}/golden-checkpoints
         CHECKPOINT_RELPATH: ${{ matrix.golden_checkpoint_relpath }}
       run: |
         set -uo pipefail
