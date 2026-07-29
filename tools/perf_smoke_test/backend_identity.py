@@ -73,6 +73,52 @@ def normalize_render_backend(value: Any) -> str | None:
     return lowered
 
 
+def validate_physics_backend(value: str, *, source: str | None = None) -> str:
+    """Return ``value`` when it is a known physics backend, else raise.
+
+    Guards against a typo'd or unsupported ``physics`` in ``tasks.json`` (e.g.
+    ``"phsyx"``) silently flowing through :func:`normalize_physics_backend` into a
+    ``backend_key`` that no threshold ever targets, which would disable the FPS gate
+    while still writing a stray baseline bucket.
+
+    Args:
+        value: A normalized physics backend name (see :func:`normalize_physics_backend`).
+        source: Optional origin (e.g. a file path) included in the error message.
+
+    Raises:
+        ValueError: If ``value`` is not one of the known physics backends.
+    """
+    if value not in _KNOWN_PHYSICS_BACKENDS:
+        where = f" in {source}" if source else ""
+        raise ValueError(
+            f"unknown physics backend {value!r}{where}; expected one of {list(_KNOWN_PHYSICS_BACKENDS)}"
+        )
+    return value
+
+
+def validate_render_backend(value: str | None, *, source: str | None = None) -> str | None:
+    """Return ``value`` when it is unset or a known render backend, else raise.
+
+    Guards against a typo'd ``render`` in ``tasks.json`` (e.g. ``"newton_rendrer"``)
+    that would otherwise be emitted as a Hydra ``presets=`` token and crash the
+    multi-minute GPU benchmark job at launch.
+
+    Args:
+        value: A normalized render backend name, or ``None`` when unset (see
+            :func:`normalize_render_backend`).
+        source: Optional origin (e.g. a file path) included in the error message.
+
+    Raises:
+        ValueError: If ``value`` is a non-empty name that is not a known render backend.
+    """
+    if value is not None and value not in _RENDER_PRESET_TOKENS:
+        where = f" in {source}" if source else ""
+        raise ValueError(
+            f"unknown render backend {value!r}{where}; expected one of {sorted(_RENDER_PRESET_TOKENS)}"
+        )
+    return value
+
+
 def make_backend_key(physics_backend: str, render_backend: str | None = None) -> str:
     physics = normalize_physics_backend(physics_backend)
     if not physics:

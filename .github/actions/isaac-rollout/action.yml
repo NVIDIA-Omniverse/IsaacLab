@@ -1,0 +1,168 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: 'Isaac rollout in Docker'
+description: >
+  Run one Isaac Sim rollout (perf benchmark or golden correctness) inside the
+  prebuilt CI container and return its exit code + wall time. Encapsulates the
+  container lifecycle shared by the perf-smoke bench job and the golden job:
+  writable cache/artifact dirs, optional PR-source overlay, the hardened
+  `docker run`, a hard wall-clock timeout via `docker wait`, log capture, and
+  cleanup. The driver-specific command is supplied by the caller as
+  `container-command`; matrix values flow through the environment (never
+  interpolated into shell source) and are forwarded into the container with
+  `docker run -e`, to prevent command injection.
+
+inputs:
+  container-command:
+    description: 'Bash body run inside the container (references forwarded env vars like "$TASK_ID").'
+    required: true
+  container-name:
+    description: 'Unique, pre-sanitized container name.'
+    required: true
+  image-tag:
+    description: 'CI image tag to run.'
+    required: true
+  image-was-pulled:
+    description: 'When "true", overlay the PR checkout over the image source (mounts workspace).'
+    required: false
+    default: 'false'
+  workspace:
+    description: 'github.workspace: host root for the jit/kit caches and the optional source overlay.'
+    required: true
+  host-artifact-dir:
+    description: 'Host directory mounted to /tmp/bench_out for this rollout''s outputs.'
+    required: true
+  timeout-s:
+    description: 'Hard wall-clock timeout for the rollout, in seconds.'
+    required: true
+  # --- run shape forwarded into the container (superset of perf + golden needs) ---
+  task-id:
+    required: true
+    description: 'Gym task id.'
+  num-envs:
+    required: true
+    description: 'Number of parallel environments.'
+  seed:
+    required: false
+    default: ''
+    description: 'Environment seed (empty = driver default).'
+  hydra-args:
+    required: false
+    default: ''
+    description: 'Hydra preset tokens (e.g. "presets=newton_mjwarp").'
+  num-frames:
+    required: false
+    default: ''
+    description: 'Perf: total benchmark steps.'
+  warmup-frames:
+    required: false
+    default: ''
+    description: 'Perf: leading steps to discard.'
+  eval-steps:
+    required: false
+    default: ''
+    description: 'Golden: rollout steps.'
+  checkpoint-path:
+    required: false
+    default: ''
+    description: 'Golden: local checkpoint path (never fetched over the network here).'
+
+outputs:
+  exit-code:
+    description: 'Container exit code (1 on timeout/failure to start).'
+    value: ${{ steps.run.outputs.exit-code }}
+  wall-time-s:
+    description: 'Measured wall-clock time of the rollout, in seconds.'
+    value: ${{ steps.run.outputs.wall-time-s }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: run
+      shell: bash
+      env:
+        CONTAINER_COMMAND: ${{ inputs.container-command }}
+        CONTAINER_NAME: ${{ inputs.container-name }}
+        CI_IMAGE_TAG: ${{ inputs.image-tag }}
+        IMAGE_WAS_PULLED: ${{ inputs.image-was-pulled }}
+        WORKSPACE: ${{ inputs.workspace }}
+        ARTIFACT_DIR: ${{ inputs.host-artifact-dir }}
+        TIMEOUT_S: ${{ inputs.timeout-s }}
+        # Run-shape values are forwarded into the container by name below; the
+        # container-command references them as "$TASK_ID" etc. Kept out of the
+        # shell source here so a crafted value cannot inject.
+        TASK_ID: ${{ inputs.task-id }}
+        NUM_ENVS: ${{ inputs.num-envs }}
+        SEED: ${{ inputs.seed }}
+        HYDRA_ARGS: ${{ inputs.hydra-args }}
+        NUM_FRAMES: ${{ inputs.num-frames }}
+        WARMUP_FRAMES: ${{ inputs.warmup-frames }}
+        EVAL_STEPS: ${{ inputs.eval-steps }}
+        CHECKPOINT_PATH: ${{ inputs.checkpoint-path }}
+      run: |
+        set -uo pipefail
+
+        mkdir -p "${ARTIFACT_DIR}" "${WORKSPACE}/jit-cache/warp" "${WORKSPACE}/jit-cache/nv" "${WORKSPACE}/kit-cache"
+        # World-writable bind mounts: the CI image runs as non-root uid 1000 but these
+        # host dirs are created by the runner user, so the in-container user must be
+        # able to write the Warp/CUDA JIT cache and the Kit/RTX shader cache.
+        chmod -R 0777 "${ARTIFACT_DIR}" "${WORKSPACE}/jit-cache" "${WORKSPACE}/kit-cache"
+
+        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+        # Overlay the PR checkout when running a pulled (prebuilt) env image, so the
+        # rollout runs the PR's code (the editable install resolves to the mounted tree).
+        SRC_MOUNT=""
+        if [ "${IMAGE_WAS_PULLED}" = "true" ]; then
+          chmod -R a+rwX "${WORKSPACE}" 2>/dev/null || true
+          SRC_MOUNT="-v ${WORKSPACE}:/workspace/isaaclab"
+        fi
+
+        docker run -d --name "${CONTAINER_NAME}" \
+          --init --stop-timeout 10 \
+          --entrypoint bash --gpus all --network=host \
+          --security-opt=no-new-privileges:true \
+          --ulimit nofile=65536:65536 \
+          --ulimit nproc=4096:4096 \
+          -e OMNI_KIT_ACCEPT_EULA=yes \
+          -e ACCEPT_EULA=Y \
+          -e OMNI_KIT_DISABLE_CUP=1 \
+          -e ISAAC_SIM_HEADLESS=1 \
+          -e PYTHONUNBUFFERED=1 \
+          -e PYTHONDONTWRITEBYTECODE=1 \
+          -e WARP_CACHE_PATH=/tmp/jit-cache/warp \
+          -e CUDA_CACHE_PATH=/tmp/jit-cache/nv \
+          -e TASK_ID -e NUM_ENVS -e NUM_FRAMES -e WARMUP_FRAMES -e EVAL_STEPS -e SEED -e HYDRA_ARGS -e CHECKPOINT_PATH \
+          -v "${ARTIFACT_DIR}:/tmp/bench_out" \
+          -v "${WORKSPACE}/jit-cache:/tmp/jit-cache" \
+          -v "${WORKSPACE}/kit-cache:/isaac-sim/kit/cache" \
+          ${SRC_MOUNT} \
+          "${CI_IMAGE_TAG}" \
+          -c "${CONTAINER_COMMAND}"
+
+        START=$(date +%s)
+
+        # Stream container logs to file and terminal while the rollout runs.
+        docker logs -f "${CONTAINER_NAME}" 2>&1 | tee "${ARTIFACT_DIR}/benchmark.log" &
+        LOGS_PID=$!
+
+        # Wait for the container to exit, with a hard wall-clock timeout.
+        ROLLOUT_EXIT=1
+        if docker_exit=$(timeout "${TIMEOUT_S}" docker wait "${CONTAINER_NAME}" 2>/dev/null); then
+          ROLLOUT_EXIT="${docker_exit:-1}"
+        else
+          echo "::warning::Isaac rollout ${CONTAINER_NAME} timed out after ${TIMEOUT_S}s"
+        fi
+
+        END=$(date +%s)
+
+        kill "${LOGS_PID}" 2>/dev/null || true
+        wait "${LOGS_PID}" 2>/dev/null || true
+        docker kill "${CONTAINER_NAME}" 2>/dev/null || true
+        docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+
+        echo "exit-code=${ROLLOUT_EXIT}" >> "${GITHUB_OUTPUT}"
+        echo "wall-time-s=$((END - START))" >> "${GITHUB_OUTPUT}"

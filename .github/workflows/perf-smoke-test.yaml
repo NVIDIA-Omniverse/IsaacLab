@@ -609,6 +609,189 @@ jobs:
         retention-days: 7
         if-no-files-found: warn
 
+    # =========================================================================
+    # Golden correctness — OPTIONAL second stage on the SAME warm runner.
+    #
+    # Runs only when this (task,backend) has a golden config (matrix.golden_present,
+    # from tasks_to_ci_matrix enrichment) AND a baked checkpoint is present. It
+    # reuses the image perf already pulled (env.CI_IMAGE_TAG) via the shared
+    # ./.github/actions/isaac-rollout action, so it pays NO extra image pull -- the
+    # whole reason it piggybacks here on an ephemeral fleet.
+    #
+    # Isolation: every step is placed AFTER perf has fully committed (result banked,
+    # per-task status posted, bench artifact uploaded) and is continue-on-error, so a
+    # golden crash/hang can never change perf's measurement, status, or artifacts.
+    # Golden self-limits via its own rollout timeout (matrix.golden_timeout_s), which
+    # the job timeout budgets for; a fresh container + GPU-clean pre-check keep it off
+    # a dirty GPU. Golden scoring/reporting happens in the separate golden_aggregate
+    # job (advisory, ubuntu-latest).
+    # =========================================================================
+    # TEST-ONLY (angehu-test/golden-ci-dryrun): pull the dummy golden checkpoint (a
+    # real rsl_rl policy) from a fork release asset into the workspace GOLDEN_ROOT, so
+    # the real --checkpoint resolve+load path is exercised and TIMED. Production bakes
+    # the checkpoint into the image instead (this step + the GOLDEN_ROOT override below
+    # do not merge).
+    - name: Golden — pull checkpoint (TEST)
+      id: golden_pull
+      if: ${{ always() && matrix.golden_present == 'true' }}
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GOLDEN_ROOT: ${{ github.workspace }}/golden-checkpoints
+        RELPATH: ${{ matrix.golden_checkpoint_relpath }}
+        RELEASE_TAG: angehu-test-golden-ckpt
+        ASSET: cartpole-physx-policy.pt
+      run: |
+        set -uo pipefail
+        dest="${GOLDEN_ROOT%/}/${RELPATH}"
+        mkdir -p "$(dirname "${dest}")"
+        start_ns=$(date +%s%N)
+        gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${ASSET}" --output "${dest}" --clobber
+        pull_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
+        bytes=$(stat -c%s "${dest}" 2>/dev/null || echo 0)
+        echo "pull_ms=${pull_ms}" >> "${GITHUB_OUTPUT}"
+        echo "::notice::Golden checkpoint pull: ${pull_ms} ms, ${bytes} bytes -> ${dest}"
+
+    - name: Golden — resolve checkpoint + GPU clean
+      id: golden_gpu
+      if: ${{ always() && matrix.golden_present == 'true' }}
+      continue-on-error: true
+      env:
+        GOLDEN_ROOT: ${{ github.workspace }}/golden-checkpoints
+        CHECKPOINT_RELPATH: ${{ matrix.golden_checkpoint_relpath }}
+      run: |
+        set -uo pipefail
+        echo "run=false" >> "$GITHUB_OUTPUT"
+        # Checkpoint is baked to GOLDEN_ROOT ahead of the runner stage; the rollout
+        # reads a LOCAL path only (no network). FIXME: wire baking in publish-image.
+        CKPT="${GOLDEN_ROOT%/}/${CHECKPOINT_RELPATH}"
+        if [ -z "${GOLDEN_ROOT}" ] || [ ! -f "${CKPT}" ]; then
+          echo "::notice::No golden checkpoint at '${GOLDEN_ROOT:-<unset>}/${CHECKPOINT_RELPATH}'; skipping golden (advisory)."
+          exit 0
+        fi
+        # Never run golden on a dirty GPU (perf's container is already reaped). If
+        # perf left the device busy, skip rather than contend/contaminate.
+        USED_MB="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')"
+        if [ -n "${USED_MB}" ] && [ "${USED_MB}" -gt 2000 ]; then
+          echo "::warning::GPU not clean (${USED_MB} MB used) after bench; skipping golden (advisory)."
+          exit 0
+        fi
+        BACKEND_KEY="${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}"
+        ARTIFACT_DIR="$(pwd)/golden-artifacts/${{ matrix.task_id }}/${BACKEND_KEY}"
+        SAFE="${{ matrix.task_id }}-${{ matrix.physics_backend }}"
+        mkdir -p "${ARTIFACT_DIR}"
+        echo "run=true" >> "$GITHUB_OUTPUT"
+        echo "path=${CKPT}" >> "$GITHUB_OUTPUT"
+        echo "backend_key=${BACKEND_KEY}" >> "$GITHUB_OUTPUT"
+        echo "artifact_dir=${ARTIFACT_DIR}" >> "$GITHUB_OUTPUT"
+        echo "container=perf-golden-${SAFE//[^a-zA-Z0-9]/-}-${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+    - name: Golden — run rollout
+      id: golden_run
+      if: ${{ always() && steps.golden_gpu.outputs.run == 'true' }}
+      continue-on-error: true
+      uses: ./.github/actions/isaac-rollout
+      with:
+        container-name: ${{ steps.golden_gpu.outputs.container }}
+        image-tag: ${{ env.CI_IMAGE_TAG }}
+        image-was-pulled: ${{ steps.pull_image.outcome == 'success' }}
+        workspace: ${{ github.workspace }}
+        host-artifact-dir: ${{ steps.golden_gpu.outputs.artifact_dir }}
+        timeout-s: ${{ matrix.golden_timeout_s }}
+        task-id: ${{ matrix.task_id }}
+        num-envs: ${{ matrix.golden_num_envs }}
+        seed: ${{ matrix.golden_seed }}
+        hydra-args: ${{ matrix.golden_hydra_args }}
+        eval-steps: ${{ matrix.golden_eval_steps }}
+        checkpoint-path: ${{ steps.golden_gpu.outputs.path }}
+        container-command: |
+          set -e
+          cd /workspace/isaaclab
+          rm -f _isaac_sim
+          ln -s /isaac-sim _isaac_sim
+          ./isaaclab.sh -p tools/perf_smoke_test/golden_runtime.py \
+            --task "$TASK_ID" \
+            --num_envs "$NUM_ENVS" \
+            --eval_steps "$EVAL_STEPS" \
+            --checkpoint "$CHECKPOINT_PATH" \
+            --output_path /tmp/bench_out \
+            ${SEED:+--seed "$SEED"} \
+            $HYDRA_ARGS
+
+    - name: Golden — retry once on failure
+      id: golden_retry
+      if: ${{ always() && steps.golden_gpu.outputs.run == 'true' && steps.golden_run.outputs.exit-code != '0' && steps.golden_run.outputs.exit-code != '' }}
+      continue-on-error: true
+      uses: ./.github/actions/isaac-rollout
+      with:
+        container-name: ${{ steps.golden_gpu.outputs.container }}-retry
+        image-tag: ${{ env.CI_IMAGE_TAG }}
+        image-was-pulled: ${{ steps.pull_image.outcome == 'success' }}
+        workspace: ${{ github.workspace }}
+        host-artifact-dir: ${{ steps.golden_gpu.outputs.artifact_dir }}
+        timeout-s: ${{ matrix.golden_timeout_s }}
+        task-id: ${{ matrix.task_id }}
+        num-envs: ${{ matrix.golden_num_envs }}
+        seed: ${{ matrix.golden_seed }}
+        hydra-args: ${{ matrix.golden_hydra_args }}
+        eval-steps: ${{ matrix.golden_eval_steps }}
+        checkpoint-path: ${{ steps.golden_gpu.outputs.path }}
+        container-command: |
+          set -e
+          cd /workspace/isaaclab
+          rm -f _isaac_sim
+          ln -s /isaac-sim _isaac_sim
+          ./isaaclab.sh -p tools/perf_smoke_test/golden_runtime.py \
+            --task "$TASK_ID" \
+            --num_envs "$NUM_ENVS" \
+            --eval_steps "$EVAL_STEPS" \
+            --checkpoint "$CHECKPOINT_PATH" \
+            --output_path /tmp/bench_out \
+            ${SEED:+--seed "$SEED"} \
+            $HYDRA_ARGS
+
+    - name: Golden — build result
+      if: ${{ always() && steps.golden_gpu.outputs.run == 'true' }}
+      continue-on-error: true
+      env:
+        TASK_ID: ${{ matrix.task_id }}
+        PHYSICS_BACKEND: ${{ matrix.physics_backend }}
+        RENDER_BACKEND: ${{ matrix.render_backend }}
+        ARTIFACT_DIR: ${{ steps.golden_gpu.outputs.artifact_dir }}
+      run: |
+        RETRY_EXIT="${{ steps.golden_retry.outputs.exit-code }}"
+        if [ -n "${RETRY_EXIT}" ]; then
+          FINAL_EXIT="${RETRY_EXIT}"
+          FINAL_WALL="${{ steps.golden_retry.outputs.wall-time-s || '0' }}"
+          EXTRA_FLAGS="--was_retried --attempt 2"
+        else
+          FINAL_EXIT="${{ steps.golden_run.outputs.exit-code || '1' }}"
+          FINAL_WALL="${{ steps.golden_run.outputs.wall-time-s || '0' }}"
+          EXTRA_FLAGS=""
+        fi
+        python3 tools/perf_smoke_test/build_golden_result.py \
+          --task_id "${TASK_ID}" \
+          --physics_backend "${PHYSICS_BACKEND}" \
+          --render_backend "${RENDER_BACKEND}" \
+          --artifact_dir "${ARTIFACT_DIR}" \
+          --exit_code "${FINAL_EXIT}" \
+          --wall_time_s "${FINAL_WALL}" \
+          --timeout_s "${{ matrix.golden_timeout_s }}" \
+          --log_file "${ARTIFACT_DIR}/benchmark.log" \
+          --golden_tasks tools/perf_smoke_test/golden_tasks.json \
+          --checkpoint_id "${{ matrix.golden_checkpoint_id }}" \
+          ${EXTRA_FLAGS}
+
+    - name: Golden — upload artifact
+      if: ${{ always() && steps.golden_gpu.outputs.run == 'true' }}
+      continue-on-error: true
+      uses: actions/upload-artifact@v7
+      with:
+        name: golden-${{ matrix.task_id }}-${{ matrix.physics_backend }}${{ matrix.render_backend != '' && format('_{0}', matrix.render_backend) || '' }}-${{ github.run_id }}
+        path: golden-artifacts/${{ matrix.task_id }}/${{ steps.golden_gpu.outputs.backend_key }}/
+        retention-days: 7
+        if-no-files-found: warn
+
     # Force-clean the container if the job is cancelled mid-run
     - name: Cleanup container on cancellation
       if: cancelled()
@@ -624,9 +807,15 @@ jobs:
         fi
         SAFE_TASK_ID="${TASK_ID//[^a-zA-Z0-9]/-}"
         SAFE_BACKEND="${BACKEND_KEY//[^a-zA-Z0-9]/-}"
-        CONTAINER_NAME="perf-bench-${SAFE_TASK_ID}-${SAFE_BACKEND}-${{ github.run_id }}"
-        docker kill "${CONTAINER_NAME}" 2>/dev/null || true
-        docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+        SAFE_GOLDEN="${TASK_ID}-${PHYSICS_BACKEND}"
+        SAFE_GOLDEN="${SAFE_GOLDEN//[^a-zA-Z0-9]/-}"
+        for CONTAINER_NAME in \
+          "perf-bench-${SAFE_TASK_ID}-${SAFE_BACKEND}-${{ github.run_id }}" \
+          "perf-golden-${SAFE_GOLDEN}-${{ github.run_id }}" \
+          "perf-golden-${SAFE_GOLDEN}-${{ github.run_id }}-retry"; do
+          docker kill "${CONTAINER_NAME}" 2>/dev/null || true
+          docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+        done
 
   # ---------------------------------------------------------------------------
   # Aggregate: oracle verdicts, baseline update, step summary
@@ -932,3 +1121,76 @@ jobs:
       target_branch: develop
       strict_ancestry: true
       dry_run: false
+
+  # ---------------------------------------------------------------------------
+  # Golden aggregate (ADVISORY, standalone). Scores every golden_result.json from
+  # the bench-job golden stage against golden_tasks.json, writes a step-summary
+  # table, and emits a SEPARATE omni-github artifact (test_tool_id=golden-policy).
+  # Pure-Python -> ubuntu-latest (no GPU, no image pull). Least privilege; never
+  # touches perf's baselines / comment / status. No PR comment (keeps golden off
+  # the slow network and out of perf's authoritative reporting path).
+  # ---------------------------------------------------------------------------
+  golden_aggregate:
+    name: Golden Policy Correctness Aggregate
+    runs-on: ubuntu-latest
+    needs: [config, bench]
+    if: >-
+      ${{ always()
+      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+
+    - name: Download golden artifacts
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        pattern: golden-*-${{ github.run_id }}
+        path: golden-artifacts/
+        merge-multiple: false
+
+    - name: Run golden aggregate
+      id: golden_agg
+      run: |
+        case "${RUNNER_OS:-Linux}-${RUNNER_ARCH:-X64}" in
+          Linux-X64)   APP_PLATFORM="linux-x86_64" ;;
+          Linux-ARM64) APP_PLATFORM="linux-aarch64" ;;
+          *) APP_PLATFORM="$(printf '%s-%s' "${RUNNER_OS:-linux}" "${RUNNER_ARCH:-x64}" | tr '[:upper:]' '[:lower:]')" ;;
+        esac
+        python3 tools/perf_smoke_test/golden_aggregate.py \
+          --artifacts_dir golden-artifacts/ \
+          --golden_tasks tools/perf_smoke_test/golden_tasks.json \
+          --gate_config tools/perf_smoke_test/gate_config.json \
+          --summary_file "${GITHUB_STEP_SUMMARY}" \
+          --omni_github_dir "${{ github.workspace }}/golden-omni-github-artifact" \
+          --omni_platform "${APP_PLATFORM}"
+
+    - name: Validate golden omni-github artifact
+      id: golden_validate
+      if: always()
+      run: |
+        result_json="${{ github.workspace }}/golden-omni-github-artifact/_testoutput/golden_test_results.json"
+        echo "upload=false" >> "${GITHUB_OUTPUT}"
+        if [ ! -f "${result_json}" ]; then
+          echo "::notice::No golden omni-github result produced; skipping upload"
+          exit 0
+        fi
+        python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d.get('test_tool_id') and d.get('app') and isinstance(d.get('tests'),list) and all(r.get('test_id') and isinstance(r.get('passed'),bool) and isinstance(r.get('duration'),(int,float)) and r.get('custom') for r in d['tests']); print('golden omni-github result OK:', len(d['tests']), 'rows')" "${result_json}"
+        echo "upload=true" >> "${GITHUB_OUTPUT}"
+
+    # Upload under the omni-github name contract
+    # (<prefix>--v1-<repo_id>-<run_id>-<run_attempt>-<check_run_id>) so omni-github
+    # ingests it as its own tool (test_tool_id=golden-policy), separate from perf.
+    - name: Upload golden results to omni-github
+      if: always() && steps.golden_validate.outputs.upload == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: golden-policy-results--v1-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ job.check_run_id }}
+        path: ${{ github.workspace }}/golden-omni-github-artifact
+        if-no-files-found: error
+        retention-days: 7
+        compression-level: 9

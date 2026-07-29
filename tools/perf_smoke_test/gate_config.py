@@ -73,6 +73,10 @@ def _merge_runtime_compatibility(raw: dict | None) -> dict:
 def load_gate_config(path: Path | str) -> dict:
     config = {
         "blocking": False,
+        # Separate advisory toggle for the golden correctness gate, independent of the
+        # performance ``blocking`` flag: golden verdicts never affect the PR outcome
+        # until this is explicitly flipped (see golden_aggregate).
+        "golden_blocking": False,
         "min_baseline_samples": MIN_BASELINE_SAMPLES,
         "max_baseline_samples": MAX_BASELINE_SAMPLES,
         "min_block_regression_pct": MIN_BLOCK_REGRESSION_PCT,

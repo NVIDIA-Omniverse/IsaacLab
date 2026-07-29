@@ -8,11 +8,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
-    from .backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+    from .backend_identity import (
+        make_backend_key,
+        normalize_physics_backend,
+        normalize_render_backend,
+        validate_physics_backend,
+        validate_render_backend,
+    )
     from .gate_types import FpsMeanThreshold
     from .gpu_identity import gpu_model_config_keys
 except ImportError:  # pragma: no cover - supports direct script imports
-    from backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+    from backend_identity import (
+        make_backend_key,
+        normalize_physics_backend,
+        normalize_render_backend,
+        validate_physics_backend,
+        validate_render_backend,
+    )
     from gate_types import FpsMeanThreshold
     from gpu_identity import gpu_model_config_keys
 
@@ -172,7 +184,8 @@ def load_tasks(tasks_json_path: Path | str | None = None) -> list[TaskConfig]:
             physics = normalize_physics_backend(backend_entry["physics"])
             if physics is None:
                 raise ValueError(f"backend entry in {path} must define a non-default physics backend")
-            render = normalize_render_backend(backend_entry.get("render"))
+            physics = validate_physics_backend(physics, source=str(path))
+            render = validate_render_backend(normalize_render_backend(backend_entry.get("render")), source=str(path))
             tasks.append(
                 TaskConfig(
                     task_id=merged["task_id"],

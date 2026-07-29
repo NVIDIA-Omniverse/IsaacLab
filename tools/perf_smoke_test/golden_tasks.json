@@ -1,0 +1,37 @@
+{
+  "_comment": "TEST-BRANCH TRIM (angehu-test/golden-ci-dryrun): Cartpole/physx only, paired with the perf Cartpole/physx cell. The checkpoint is a real rsl_rl policy pulled from a fork release asset (see the 'Golden - pull checkpoint (TEST)' workflow step) and loaded via the real --checkpoint path. KPI thresholds stay reporting-only (advisory). Not for merge.",
+  "defaults": {
+    "type": "golden",
+    "runs_on": "gpu-l40s",
+    "preset": "default",
+    "rl_library": "rsl_rl",
+    "agent": "rsl_rl_cfg_entry_point",
+    "num_envs": 128,
+    "eval_steps": 500,
+    "seed": 42,
+    "deterministic": true,
+    "timeout_minutes": 10,
+    "tags": ["always"]
+  },
+  "tasks": [
+    {
+      "task_id": "Isaac-Cartpole-Direct",
+      "checkpoint": {
+        "id": "cartpole-{backend_key}-testdummy",
+        "path": "Isaac-Cartpole-Direct/{backend_key}/policy.pt"
+      },
+      "backends": [
+        {"physics": "physx"}
+      ],
+      "kpis": {
+        "reward": [
+          {"threshold_name": "reward-floor", "threshold": 0.0, "threshold_verdict": null}
+        ],
+        "ep_length": [
+          {"threshold_name": "survival-floor", "threshold": 0.0, "threshold_verdict": null}
+        ],
+        "success_rate": []
+      }
+    }
+  ]
+}
