@@ -134,13 +134,13 @@ def main() -> int:
             has_hard_failure = True
 
     table = _build_table(rows)
-    print("\n## Golden Correctness Results\n")
+    print("\n## Golden Policy Correctness Results\n")
     print(table)
     print()
 
     if args.summary_file:
         with open(args.summary_file, "a") as fh:
-            fh.write("\n## Golden Correctness Results\n\n")
+            fh.write("\n## Golden Policy Correctness Results\n\n")
             fh.write(table)
             fh.write("\n")
 
