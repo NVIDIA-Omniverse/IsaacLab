@@ -22,6 +22,7 @@ from isaaclab.utils.warp import ProxyArray
 
 import isaaclab_ovphysx.tensor_types as TT
 from isaaclab_ovphysx.physics import OvPhysxManager
+from isaaclab_ovphysx.sim.views.ovphysx_view import OvPhysxView
 
 from .contact_sensor_data import ContactSensorData
 from .kernels import (
@@ -92,6 +93,9 @@ class ContactSensor(BaseContactSensor):
         self._physx_instance: Any = None
         self._contact_binding: Any = None
         self._pose_binding: Any = None
+        # The pose binding (track_pose only) is managed by an OvPhysxView; the ContactBinding
+        # is a separate wheel API the view does not wrap.
+        self._root_view: OvPhysxView | None = None
         # Pre-allocated read buffers, populated in _create_buffers.
         self._net_forces_flat_buf: wp.array | None = None
         self._force_matrix_flat_buf: wp.array | None = None
@@ -209,13 +213,12 @@ class ContactSensor(BaseContactSensor):
         self._body_names = body_names
         self._num_sensors = len(body_names)
 
-        # Build glob patterns: one per (env, sensor body).
-        # IsaacLab path forms map to ovphysx fnmatch globs the same way Articulation does.
-        _, body_path_expr = body_matches[0]
-        body_parent = body_path_expr.rsplit("/", 1)[0]
-        base_glob = re.sub(r"\{ENV_REGEX_NS\}", "*", body_parent)
-        base_glob = re.sub(r"\.\*", "*", base_glob)
-        sensor_patterns = [f"{base_glob}/{name}" for name in body_names]
+        # Build glob patterns: one per (env, sensor body), each from that body's own resolved
+        # expression. Building from a shared parent plus leaf names breaks on nested rigid-body
+        # hierarchies (child links authored under their parent link prim), where the bodies do
+        # not share a parent. IsaacLab path forms map to ovphysx fnmatch globs the same way
+        # Articulation does.
+        sensor_patterns = [re.sub(r"\.\*", "*", re.sub(r"\{ENV_REGEX_NS\}", "*", expr)) for _, expr in body_matches]
 
         # Build filter patterns (flat: len = n_sensors * filters_per_sensor).
         filter_globs = [
@@ -248,6 +251,7 @@ class ContactSensor(BaseContactSensor):
             raise RuntimeError(
                 "Failed to initialize contact binding for specified bodies."
                 f"\n\tInput prim path     : {self.cfg.prim_path}"
+                f"\n\tSensor patterns     : {sensor_patterns}"
                 f"\n\tNum sensor bodies   : {self._num_sensors}"
                 f"\n\tBound sensors       : {self._contact_binding.sensor_count}"
             )
@@ -280,11 +284,9 @@ class ContactSensor(BaseContactSensor):
                     f"under '{self.cfg.prim_path}').  Workaround: create one ContactSensor "
                     "per body."
                 )
-            single_pose_pattern = f"{base_glob}/{body_names[0]}"
-            self._pose_binding = physx_instance.create_tensor_binding(
-                pattern=single_pose_pattern,
-                tensor_type=TT.RIGID_BODY_POSE,
-            )
+            single_pose_pattern = sensor_patterns[0]
+            self._root_view = OvPhysxView(physx_instance, pattern=single_pose_pattern, device=self._device)
+            self._pose_binding = self._root_view.binding_for(TT.RIGID_BODY_POSE)
             if self._pose_binding.count != self._contact_binding.sensor_count:
                 raise RuntimeError(
                     "RIGID_BODY_POSE binding count mismatch."
@@ -378,7 +380,7 @@ class ContactSensor(BaseContactSensor):
 
         if self.cfg.track_pose:
             # Read pose into [num_envs * num_sensors, 7] float32 -> view as transformf.
-            self._pose_binding.read(self._poses_flat_buf)
+            self._root_view.read_into(TT.RIGID_BODY_POSE, self._poses_flat_buf)
             poses_flat = self._poses_flat_buf.view(wp.transformf)
             wp.launch(
                 split_flat_pose_to_pos_quat,
@@ -518,4 +520,7 @@ class ContactSensor(BaseContactSensor):
             with contextlib.suppress(Exception):
                 self._pose_binding.destroy()
         self._pose_binding = None
+        # Drop the view too: it caches the same (now-destroyed) pose binding, so leaving it set
+        # would keep a destroyed handle reachable. _initialize_impl rebuilds a fresh view on play.
+        self._root_view = None
         self._physx_instance = None

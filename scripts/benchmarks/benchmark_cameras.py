@@ -14,10 +14,10 @@ through the auto-tune functionality.
 .. code-block:: bash
 
     # Usage with GUI
-    ./isaaclab.sh -p scripts/benchmarks/benchmark_cameras.py -h
+    uv run python scripts/benchmarks/benchmark_cameras.py -h
 
     # Usage with headless
-    ./isaaclab.sh -p scripts/benchmarks/benchmark_cameras.py -h --headless
+    uv run python scripts/benchmarks/benchmark_cameras.py -h
 
 """
 
@@ -226,11 +226,11 @@ parser.add_argument(
 
 # Benchmark arguments
 parser.add_argument(
-    "--benchmark_backend",
+    "--benchmark_formatter",
     type=str,
     default="omniperf",
     choices=["json", "osmo", "omniperf", "summary"],
-    help="Benchmarking backend options, defaults omniperf",
+    help="Benchmark output formatter, defaults omniperf",
 )
 parser.add_argument("--output_path", type=str, default=".", help="Path to output benchmark results.")
 
@@ -260,6 +260,7 @@ import torch
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObject, RigidObjectCfg
+from isaaclab.benchmark import BaseIsaacLabBenchmark, DictMeasurement, SingleMeasurement
 from isaaclab.scene.interactive_scene import InteractiveScene
 from isaaclab.sensors import (
     Camera,
@@ -268,7 +269,6 @@ from isaaclab.sensors import (
     RayCasterCameraCfg,
     patterns,
 )
-from isaaclab.test.benchmark import BaseIsaacLabBenchmark, DictMeasurement, SingleMeasurement
 from isaaclab.utils.math import orthogonalize_perspective_depth, unproject_depth
 
 from isaaclab_tasks.utils import load_cfg_from_registry
@@ -777,13 +777,13 @@ def main():
         num_cameras = args_cli.num_ray_caster_cameras
 
     # Create the benchmark
-    backend_type = args_cli.benchmark_backend
+    formatter_type = args_cli.benchmark_formatter
     benchmark = BaseIsaacLabBenchmark(
         benchmark_name="benchmark_cameras",
-        backend_type=backend_type,
+        formatter_type=formatter_type,
         output_path=args_cli.output_path,
         use_recorders=True,
-        frametime_recorders=backend_type in ("summary", "omniperf"),
+        frametime_recorders=formatter_type in ("summary", "omniperf"),
         output_prefix="benchmark_cameras",
         workflow_metadata={
             "metadata": [
@@ -952,7 +952,7 @@ def main():
 
     # Finalize benchmark
     benchmark.update_manual_recorders()
-    benchmark._finalize_impl()
+    benchmark.finalize()
 
 
 if __name__ == "__main__":

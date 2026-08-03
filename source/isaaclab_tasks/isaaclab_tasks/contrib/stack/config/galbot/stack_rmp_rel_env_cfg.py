@@ -18,7 +18,10 @@ from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.utils.configclass import configclass
 
 from isaaclab_tasks.contrib.stack import mdp
-from isaaclab_tasks.utils.presets import MultiBackendRendererCfg
+from isaaclab_tasks.utils.presets import (
+    MultiBackendRendererCfg,
+    set_isaac_rtx_global_settings,
+)
 
 from . import stack_joint_pos_env_cfg
 
@@ -261,7 +264,13 @@ class RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg(RmpFlowGalbotLeftArmCubeStac
 
         # Set settings for camera rendering
         self.num_rerenders_on_reset = 3
-        self.sim.render.antialiasing_mode = "DLAA"  # Use DLAA for higher quality rendering
+        for camera_cfg in (
+            self.scene.right_wrist_cam,
+            self.scene.left_wrist_cam,
+            self.scene.ego_cam,
+            self.scene.front_cam,
+        ):
+            set_isaac_rtx_global_settings(camera_cfg.renderer_cfg, antialiasing_mode="DLAA")
 
         # List of image observations in policy observations
         self.image_obs_list = ["ego_cam", "left_wrist_cam", "right_wrist_cam"]
@@ -273,7 +282,7 @@ class RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg(RmpFlowGalbotLeftArmCubeStac
 
 
 @configclass
-class GalbotLeftArmJointPositionCubeStackVisuomotorEnvCfg_PLAY(RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg):
+class GalbotLeftArmJointPositionCubeStackVisuomotorEnvCfg(RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -299,7 +308,7 @@ class GalbotLeftArmJointPositionCubeStackVisuomotorEnvCfg_PLAY(RmpFlowGalbotLeft
 # Task Envs for VLA Policy Close-loop Evaluation (in Task Space)
 ##
 @configclass
-class GalbotLeftArmRmpFlowCubeStackVisuomotorEnvCfg_PLAY(RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg):
+class GalbotLeftArmRmpFlowCubeStackVisuomotorEnvCfg(RmpFlowGalbotLeftArmCubeStackVisuomotorEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()

@@ -19,6 +19,8 @@ from pxr import UsdGeom, UsdPhysics
 import isaaclab.sim as sim_utils
 from isaaclab.sim import SimulationCfg, SimulationContext
 
+pytestmark = pytest.mark.integration
+
 
 def _make_xform(stage, path="/World/Body"):
     UsdGeom.Xform.Define(stage, path)
@@ -98,6 +100,22 @@ def test_mujoco_rigid_body_fragment_writes_mjc_namespace():
     UsdPhysics.RigidBodyAPI.Apply(prim)
     apply_namespaced(MujocoRigidBodyCfg(gravcomp=1.0), "/World/B3", stage)
     assert abs(prim.GetAttribute("mjc:gravcomp").Get() - 1.0) < 1e-6
+
+
+def test_mujoco_rigid_body_fragment_does_not_write_gravcomp_when_none():
+    # fragment-path equivalent of the legacy test_mujoco_gravcomp_not_written_when_none:
+    # an unset gravcomp must not author mjc:gravcomp
+    from isaaclab_newton.sim.schemas import MujocoRigidBodyCfg
+
+    from isaaclab.sim.schemas import apply_namespaced
+
+    sim_utils.create_new_stage()
+    SimulationContext(SimulationCfg(dt=0.01))
+    stage = sim_utils.get_current_stage()
+    prim = _make_xform(stage, "/World/B3b")
+    UsdPhysics.RigidBodyAPI.Apply(prim)
+    apply_namespaced(MujocoRigidBodyCfg(), "/World/B3b", stage)
+    assert prim.GetAttribute("mjc:gravcomp").Get() is None
 
 
 # -------------------------------------------------------------------------------------
@@ -219,7 +237,7 @@ def test_apply_namespaced_raises_without_namespace():
     from typing import ClassVar
 
     from isaaclab.sim.schemas import RigidBodyFragment, apply_namespaced
-    from isaaclab.utils import configclass
+    from isaaclab.utils.configclass import configclass
 
     @configclass
     class _NoNamespaceFragment(RigidBodyFragment):

@@ -18,21 +18,20 @@ Tests:
     - from isaaclab.scene import InteractiveSceneCfg -> verify importable
     - python -m isaaclab --help -> verify CLI functional
     - import pinocchio -> verify importable
-    - inspect built wheel -> verify each promoted extension keeps
-        isaaclab/source/<ext>/config/extension.toml for Kit discovery
+    - python -c "import importlib.util; raise SystemExit(importlib.util.find_spec('pytetwild') is not None)"
+        -> verify the all extra omits tetrahedralization dependencies
 """
 
 from __future__ import annotations
 
 import glob
-import re
 import shutil
-import zipfile
 
 import pytest
 from utils import UV_Mixin, run_cmd
 
 
+@pytest.mark.smoke
 class Test_Wheel_Builder_Smoke(UV_Mixin):
     """Test building the isaaclab wheel and installing it in a uv environment."""
 
@@ -135,35 +134,13 @@ class Test_Wheel_Builder_Smoke(UV_Mixin):
         result = self.run_in_uv_env(["python", "-c", "import pinocchio as pin; print(pin.__version__)"])
         assert result.returncode == 0, f"import pinocchio failed:\n{result.stdout}\n{result.stderr}"
 
-    # inspect the built wheel's file layout
-    def test_promoted_extensions_remain_discoverable_under_source(self):
-        """Each promoted extension must keep ``isaaclab/source/<ext>/config/extension.toml``.
-
-        The ``apps/*.kit`` experience files register ``${app}/../source`` as a Kit extension
-        search folder. ``build.sh`` promotes each extension's Python package to the top level
-        (for ``import isaaclab_<ext>``); if it also drops the extension from ``source/`` then Kit
-        cannot resolve it and the dependency solver aborts with
-        ``isaaclab_assets ... (none found)`` before the app starts. This guards against that
-        regression by checking the wheel layout directly.
-        """
-        with zipfile.ZipFile(self._wheel) as wheel:
-            names = set(wheel.namelist())
-
-        # Promoted extensions are top-level packages named ``isaaclab_<ext>`` that ship a
-        # ``config/extension.toml`` (the core ``isaaclab`` package is handled separately and is
-        # not promoted, so it is intentionally excluded here).
-        promoted = sorted(
-            {
-                match.group(1)
-                for name in names
-                if (match := re.fullmatch(r"(isaaclab_[^/]+)/config/extension.toml", name))
-            }
+    def test_install_all_omits_tetrahedralization_dependencies(self):
+        """Verify the wheel's all extra does not install pytetwild."""
+        result = self.run_in_uv_env(
+            [
+                "python",
+                "-c",
+                "import importlib.util; raise SystemExit(importlib.util.find_spec('pytetwild') is not None)",
+            ]
         )
-        assert promoted, f"No promoted extensions found in wheel {self._wheel}; namelist may have changed."
-        assert "isaaclab_assets" in promoted, f"Expected isaaclab_assets among promoted extensions, got: {promoted}"
-
-        missing = [ext for ext in promoted if f"isaaclab/source/{ext}/config/extension.toml" not in names]
-        assert not missing, (
-            "Promoted extensions are missing their Kit-discoverable config/extension.toml under "
-            f"isaaclab/source/ (Kit dependency resolution will fail for these): {missing}"
-        )
+        assert result.returncode == 0, f"pytetwild should not be installed by [all]:\n{result.stdout}\n{result.stderr}"

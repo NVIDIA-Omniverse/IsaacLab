@@ -25,8 +25,8 @@ import torch
 import omni.replicator.core as rep
 from pxr import Gf
 
-import isaaclab.cloner as lab_cloner
 import isaaclab.sim as sim_utils
+from isaaclab import cloner as lab_cloner
 from isaaclab.cloner import ClonePlan
 from isaaclab.sensors.camera import Camera, CameraCfg
 from isaaclab.sensors.ray_caster import MultiMeshRayCasterCamera, MultiMeshRayCasterCameraCfg, patterns
@@ -36,6 +36,8 @@ from isaaclab.terrains.utils import create_prim_from_mesh
 
 from isaaclab_assets.robots.anymal import ANYMAL_C_CFG
 from isaaclab_assets.robots.spot import SPOT_CFG
+
+pytestmark = [pytest.mark.integration, pytest.mark.rendering]
 
 # sample camera poses (quaternions in xyzw format)
 POSITION = [2.5, 2.5, 2.5]

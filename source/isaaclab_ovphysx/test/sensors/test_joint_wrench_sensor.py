@@ -12,9 +12,9 @@ Mirrors ``isaaclab_physx`` ``test_joint_wrench_sensor.py``; only the
 fixtures and raw-tensor read helper change. Physical assertions are
 kept byte-identical so the two backends report the same convention.
 
-``ovphysx<=0.3.7`` binds device mode (CPU vs GPU) at the C++ layer on the
-first ``ovphysx.PhysX(device=...)`` construction.  Full coverage therefore
-requires two pytest runs -- once with ``-k 'cpu'`` and once with
+The OVPhysX runtime fixes device mode (CPU vs GPU) when the process creates
+its first ``ovphysx.PhysX`` instance. Full coverage therefore requires two
+pytest runs -- once with ``-k 'cpu'`` and once with
 ``-k 'cuda:0'``.  The ``_ovphysx_skip_other_device`` autouse fixture below
 preempts the manager's :exc:`RuntimeError` by ``pytest.skip``-ing on the
 unlocked device so single-device runs finish cleanly.
@@ -52,8 +52,10 @@ from isaaclab_assets.robots.ant import ANT_CFG  # noqa: E402
 
 wp.init()
 
-# OVPhysX/Warp and the PyTorch reference use different float32 operation order on CUDA.
-_OVPHYSX_WRENCH_RTOL = 5e-6
+# OVPhysX/Warp and the PyTorch reference use different float32 operation order on CUDA. The
+# relative gap grows with the wrench magnitude: the Ant scenes see contact wrenches on the order
+# of 1e8, where the two orderings differ by a few 1e-5 relative.
+_OVPHYSX_WRENCH_RTOL = 1e-4
 _OVPHYSX_WRENCH_ATOL = 1e-5
 
 # ---------------------------------------------------------------------------

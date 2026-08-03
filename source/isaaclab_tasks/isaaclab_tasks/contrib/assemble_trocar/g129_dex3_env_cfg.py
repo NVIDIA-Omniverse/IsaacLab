@@ -24,6 +24,7 @@ from isaaclab_tasks.contrib.assemble_trocar.config import (  # isort: skip
     CameraPresets,
     G1RobotPresets,
 )
+from isaaclab_tasks.utils.presets import set_isaac_rtx_global_settings
 
 joint_names = [
     "left_hip_pitch_joint",
@@ -93,14 +94,14 @@ class AssembleTrocarSceneCfg(InteractiveSceneCfg):
     right_wrist_camera = CameraPresets.right_dex3_wrist_camera()
 
     scene = AssetBaseCfg(
-        prim_path="/World/envs/env_.*/Scene",
+        prim_path="{ENV_REGEX_NS}/Scene",
         spawn=UsdFileCfg(
             usd_path=f"{USD_ROOT}/scene03.usd",
         ),
     )
 
     trocar_1 = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/trocar_1",
+        prim_path="{ENV_REGEX_NS}/trocar_1",
         spawn=UsdFileCfg(
             usd_path=f"{USD_ROOT}/Assets/Trocar002/Trocar002-xform-wo.usd",
             collision_props=sim_utils.CollisionPropertiesCfg(
@@ -116,7 +117,7 @@ class AssembleTrocarSceneCfg(InteractiveSceneCfg):
     )
 
     trocar_2 = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/trocar_2",
+        prim_path="{ENV_REGEX_NS}/trocar_2",
         spawn=UsdFileCfg(
             usd_path=(
                 f"{USD_ROOT}/Assets/"
@@ -133,7 +134,7 @@ class AssembleTrocarSceneCfg(InteractiveSceneCfg):
         ),
     )
     tray = ArticulationCfg(
-        prim_path="/World/envs/env_.*/surgical_tray",
+        prim_path="{ENV_REGEX_NS}/surgical_tray",
         spawn=UsdFileCfg(
             usd_path=f"{USD_ROOT}/Assets/SurgicalTray001/SurgicalTray001.usd",
         ),
@@ -396,12 +397,17 @@ class G1AssembleTrocarEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
         self.sim.physics = PhysxCfg(bounce_threshold_velocity=0.01)
-        self.sim.render.enable_translucency = True
-        self.sim.render.carb_settings = {
-            "rtx.raytracing.fractionalCutoutOpacity": True,
-        }
-        self.sim.render.rendering_mode = "quality"
-        self.sim.render.antialiasing_mode = "DLAA"
+        for camera_cfg in (
+            self.scene.front_camera,
+            self.scene.left_wrist_camera,
+            self.scene.right_wrist_camera,
+        ):
+            set_isaac_rtx_global_settings(
+                camera_cfg.renderer_cfg,
+                enable_translucency=True,
+                carb_settings={"rtx.raytracing.fractionalCutoutOpacity": True},
+                antialiasing_mode="DLAA",
+            )
 
 
 @configclass

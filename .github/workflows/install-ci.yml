@@ -30,6 +30,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+
 jobs:
   changes:
     name: Detect Changes
@@ -59,6 +60,7 @@ jobs:
             $'^\\.github/workflows/install-ci\\.yml$\tThis workflow file'
             $'^VERSION$\tVersion file'
             $'(^|/)pyproject\\.toml$\tPython project metadata'
+            $'^uv\\.lock$\tuv lockfile'
             $'(^|/)environment\\.ya?ml$\tConda environment file'
           )
 

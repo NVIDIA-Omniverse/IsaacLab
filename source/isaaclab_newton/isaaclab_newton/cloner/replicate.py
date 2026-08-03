@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 import torch
 from newton import ModelBuilder
@@ -15,11 +15,11 @@ from newton._src.usd.schemas import SchemaResolverNewton, SchemaResolverPhysx
 
 from pxr import Usd
 
-from isaaclab.cloner.replicate_session import REPLICATION_QUEUE
 from isaaclab.physics import PhysicsManager
 from isaaclab.sim.utils.newton_model_utils import replace_newton_builder_shape_colors
 
 from isaaclab_newton.cloner.newton_clone_utils import (
+    _restore_visible_colliders_without_visual_shapes,
     build_source_builders,
     rename_builder_labels,
     replicate_builder_mapping,
@@ -44,6 +44,7 @@ def _build_newton_builder_from_mapping(
     quaternions: torch.Tensor | None = None,
     up_axis: str = "Z",
     simplify_meshes: bool = True,
+    load_visual_shapes: bool = True,
 ) -> tuple[ModelBuilder, object, dict, list, dict[str, ModelBuilder]]:
     """Build a Newton model builder from clone mapping inputs.
 
@@ -61,11 +62,16 @@ def _build_newton_builder_from_mapping(
     manager_cls = PhysicsManager._sim.physics_manager
 
     builder = manager_cls.create_builder(up_axis=up_axis)
+    # Swap height-field-tagged terrain colliders for Newton heightfields before the
+    # mesh import, and skip those prims in add_usd so the terrain is not imported twice.
+    hf_ignore_paths = manager_cls._inject_terrain_heightfields(stage, builder)
     stage_info = builder.add_usd(
         stage,
-        ignore_paths=["/World/envs", *sources],
+        ignore_paths=["/World/envs", *sources, *hf_ignore_paths],
         schema_resolvers=schema_resolvers,
+        load_visual_shapes=load_visual_shapes,
     )
+    _restore_visible_colliders_without_visual_shapes(builder, stage, stage_info["path_shape_map"], load_visual_shapes)
     replace_newton_builder_shape_colors(builder, stage)
 
     # Deformable prim paths are handled by per_world_builder_hooks, not add_usd.
@@ -89,6 +95,7 @@ def _build_newton_builder_from_mapping(
         schema_resolvers,
         ignore_paths=deformable_ignore_paths or None,
         simplify_meshes=simplify_meshes,
+        load_visual_shapes=load_visual_shapes,
     )
 
     # Inject registered sites into source builders (and global sites into main builder).
@@ -108,6 +115,21 @@ def _build_newton_builder_from_mapping(
     return builder, stage_info, site_index_map, world_xforms, source_builders
 
 
+def _renderer_wants_visual_shapes() -> bool:
+    """Whether anything in this run will draw the Newton model's visual-only shapes.
+
+    Visual shapes are consumed by the viewers, offscreen ``rgb_array`` capture, and camera
+    sensors on any renderer backend. A headless training run without cameras draws none of
+    them, so importing them only costs USD parse time and memory.
+    """
+    from isaaclab.sim import SimulationContext
+
+    sim = SimulationContext.instance()
+    if sim is None:
+        return True
+    return bool(sim.is_rendering or sim.can_render_rgb_array() or sim.visual_shapes_required)
+
+
 class NewtonReplicateContext:
     """Queue and run Newton replication work for one stage."""
 
@@ -118,6 +140,7 @@ class NewtonReplicateContext:
         device: str = "cpu",
         up_axis: str = "Z",
         simplify_meshes: bool | None = None,
+        load_visual_shapes: bool | None = None,
         commit_to_manager: bool = True,
     ):
         """Initialize the context.
@@ -128,18 +151,26 @@ class NewtonReplicateContext:
             up_axis: Up axis for the Newton model builder.
             simplify_meshes: Whether to run convex-hull mesh approximation. If
                 ``None``, read from the active :class:`NewtonCfg`.
+            load_visual_shapes: Whether to import visual-only geometry. If ``None``,
+                read from the active :class:`NewtonCfg`, which itself defaults to
+                importing them only when a renderer or visualizer is active.
             commit_to_manager: Whether :meth:`replicate` should publish the builder to
                 :class:`NewtonManager`.
         """
         self.stage = stage
         self.device = device
         self.up_axis = up_axis
-        if simplify_meshes is None:
+        if simplify_meshes is None or load_visual_shapes is None:
             from isaaclab_newton.physics import NewtonCfg
 
             cfg = PhysicsManager._cfg
-            simplify_meshes = cfg.simplify_meshes if isinstance(cfg, NewtonCfg) else True
+            is_newton_cfg = isinstance(cfg, NewtonCfg)
+            if simplify_meshes is None:
+                simplify_meshes = cfg.simplify_meshes if is_newton_cfg else True
+            if load_visual_shapes is None:
+                load_visual_shapes = cfg.load_visual_shapes if is_newton_cfg else None
         self.simplify_meshes = simplify_meshes
+        self.load_visual_shapes = _renderer_wants_visual_shapes() if load_visual_shapes is None else load_visual_shapes
         self.commit_to_manager = commit_to_manager
         self._queue: list[_MappingBatch] = []
 
@@ -225,6 +256,7 @@ class NewtonReplicateContext:
             quaternions=quaternions,
             up_axis=self.up_axis,
             simplify_meshes=self.simplify_meshes,
+            load_visual_shapes=self.load_visual_shapes,
         )
         fabric_body_bindings = rename_builder_labels(builder, sources, destinations, env_ids, mapping)
         if self.commit_to_manager:
@@ -238,15 +270,9 @@ class NewtonReplicateContext:
         return builder, stage_info, site_index_map
 
 
-def queue_newton_physics_replication(cfg: Any) -> None:
-    """Register ``cfg`` for Newton replication when :func:`~isaaclab.cloner.replicate` next runs.
-
-    Appends ``(cfg, NewtonReplicateContext)`` to
-    :data:`~isaaclab.cloner.REPLICATION_QUEUE`. The actual row resolution and dispatch
-    happen inside :func:`~isaaclab.cloner.replicate`, so this helper is safe to call from
-    any asset constructor — no active session is required.
-    """
-    REPLICATION_QUEUE.append((cfg, NewtonReplicateContext))
+PHYSICS_CONTEXT = NewtonReplicateContext
+"""Physics-only replication context for Newton assets.  USD replication is added automatically
+by :func:`~isaaclab.cloner.replicate` when the asset has a spawner and Kit is available."""
 
 
 def newton_physics_replicate(

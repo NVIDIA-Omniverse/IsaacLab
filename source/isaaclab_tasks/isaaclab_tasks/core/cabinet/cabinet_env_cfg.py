@@ -6,7 +6,7 @@
 
 from dataclasses import MISSING
 
-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+from isaaclab_newton.physics import KaminoSolverCfg, MJWarpSolverCfg, NewtonCfg
 from isaaclab_physx.physics import PhysxCfg
 
 import isaaclab.sim as sim_utils
@@ -19,6 +19,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.physics import PhysxAutoCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer import OffsetCfg
@@ -45,19 +46,16 @@ class CabinetSimCfg(PresetCfg):
     """Simulation configuration presets for the cabinet environment.
 
     Wraps the full :class:`~isaaclab.sim.SimulationCfg` so that Newton can run at a
-    finer physics timestep (1/200 s) while PhysX keeps its default (1/60 s).
+    finer physics timestep (1/600 s) while PhysX keeps its default (1/60 s).
     """
 
-    default: SimulationCfg = SimulationCfg(
+    isaacsim_physx: SimulationCfg = SimulationCfg(
         dt=1 / 60,
         render_interval=1,
         physics=PhysxCfg(bounce_threshold_velocity=0.01, friction_correlation_distance=0.00625),
     )
-    physx: SimulationCfg = SimulationCfg(
-        dt=1 / 60,
-        render_interval=1,
-        physics=PhysxCfg(bounce_threshold_velocity=0.01, friction_correlation_distance=0.00625),
-    )
+    physx: SimulationCfg = isaacsim_physx.replace(physics=PhysxAutoCfg(isaacsim_physx=isaacsim_physx.physics))
+    default: SimulationCfg = physx
     newton_mjwarp: SimulationCfg = SimulationCfg(
         dt=1 / 600,
         render_interval=1,
@@ -72,6 +70,11 @@ class CabinetSimCfg(PresetCfg):
             num_substeps=1,
             debug_mode=False,
         ),
+    )
+    newton_kamino: SimulationCfg = SimulationCfg(
+        dt=1 / 600,
+        render_interval=1,
+        physics=NewtonCfg(solver_cfg=KaminoSolverCfg(max_contacts_per_world=64)),
     )
 
 
@@ -260,6 +263,7 @@ class _CabinetNewtonEventCfg:
 class CabinetEventCfg(PresetCfg):
     default: EventCfg = EventCfg()
     physx: EventCfg = EventCfg()
+    isaacsim_physx: EventCfg = physx
     newton_mjwarp: _CabinetNewtonEventCfg = _CabinetNewtonEventCfg()
 
 
