@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "execution_scope": "outer_agent_only",
+    "verdict_authority": false,
+    "update_mode": "reviewed_commit_pin"
+  },
+  "installer": {
+    "package": "skills",
+    "version": "1.5.21",
+    "integrity": "sha512-CJ4wx692UkQAW+DLpjJg/ww6dJBojq5E8sQBOqP639GutO72v4EFiV/fq1etW2r9NhM/mwaIq8YoqKFJ9XV7ng=="
+  },
+  "sources": [
+    {
+      "repository": "https://github.com/isaac-sim/IsaacLab",
+      "commit_sha": "62e1433e6d5f277f4d7f62a54dec16692b2bb11e",
+      "skills": [
+        {
+          "name": "isaaclab-installing-isaac-lab",
+          "path": "skills/user/install-isaac-lab",
+          "handoff": "host_onboarding",
+          "restriction": "Never use for per-commit reconstruction."
+        },
+        {
+          "name": "isaaclab-setup-troubleshooting",
+          "path": "skills/user/setup-troubleshooting",
+          "handoff": "host_setup_failure",
+          "restriction": "Do not reinterpret candidate skips as performance verdicts."
+        },
+        {
+          "name": "isaaclab-selecting-backends",
+          "path": "skills/user/select-backends",
+          "handoff": "plan_backend_selection",
+          "restriction": "Persist the selected backend in the resolved bisection plan."
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/isaac-sim/IsaacSim",
+      "commit_sha": "987015050efebfd0cd5d3736ae47fffe5adee308",
+      "skills": [
+        {
+          "name": "profile-isaac-sim",
+          "path": "skills/profile-isaac-sim",
+          "handoff": "post_bisection_profiling",
+          "restriction": "Run only after deterministic bisection; do not alter its verdict."
+        }
+      ]
+    }
+  ]
+}

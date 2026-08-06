@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isaaclab-bisection-agent"
+version = "0.1.0a1"
+description = "Reproducible performance-regression bisection for IsaacLab"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+test = [
+    "pre-commit",
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+isaaclab-bisect = "isaaclab_bisection.cli:main"
+isaaclab-bisect-runner = "isaaclab_bisection.runner:main"
+isaaclab-bisect-scan-artifacts = "isaaclab_bisection.artifact_security:main"
+isaaclab-bisect-skill = "isaaclab_bisection.skill_api:main"
+isaaclab-bisect-upstream-skills = "isaaclab_bisection.upstream_skills:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+isaaclab_bisection = [
+    "prompts/*.md",
+    "tasks.json",
+    "upstream_skills.lock.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

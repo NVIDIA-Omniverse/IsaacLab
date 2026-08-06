@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isaac-sim.github.io/IsaacLab/schemas/perf-bisect-range-input-v1.json",
+  "title": "Isaac Lab performance bisection request",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "operation",
+    "work_dir",
+    "tooling_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "operation": {
+      "const": "bisect_range"
+    },
+    "work_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tooling_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan": {
+      "type": "string",
+      "minLength": 1
+    },
+    "good_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bad_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runner": {
+      "$ref": "#/$defs/runner"
+    },
+    "task": {
+      "$ref": "#/$defs/task"
+    },
+    "metric": {
+      "$ref": "#/$defs/metric"
+    },
+    "measurement": {
+      "$ref": "#/$defs/measurement"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "plan"
+      ]
+    },
+    {
+      "required": [
+        "good_ref",
+        "bad_ref",
+        "task_id",
+        "backend_key"
+      ]
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "runner": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "synthetic",
+            "local-source",
+            "docker-source",
+            "local-reconstruct",
+            "docker-reconstruct"
+          ]
+        },
+        "gpu_model": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "source_dir": {
+          "type": "string"
+        },
+        "jit_cache": {
+          "type": "string"
+        },
+        "kit_cache": {
+          "type": "string"
+        },
+        "local_env_dir": {
+          "type": "string"
+        },
+        "ld_preload": {
+          "type": "string"
+        },
+        "trust_target_code": {
+          "type": "boolean",
+          "description": "Required and true for real modes after human review of the executable target history."
+        },
+        "extra_args": {
+          "type": "array",
+          "description": "Legacy passthrough limited to --install_scope and one value.",
+          "prefixItems": [
+            {
+              "const": "--install_scope"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "local-source",
+                  "docker-source",
+                  "local-reconstruct",
+                  "docker-reconstruct"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "trust_target_code": {
+                "const": true
+              }
+            },
+            "required": [
+              "trust_target_code"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "num_envs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "num_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warmup_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "camera_resolution": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ],
+          "items": false
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hydra_args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "metric": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "regression_direction": {
+          "enum": [
+            "decrease",
+            "increase"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "measurement": {
+      "type": "object",
+      "properties": {
+        "reference_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_reference_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "candidate_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_candidate_runs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warmup_runs": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "min_regression_pct": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gray_zone_pct": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reference_noise_multiplier": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_reference_spread_pct": {
+          "type": "number",
+          "minimum": 0
+        },
+        "candidate_timeout_s": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_tests": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

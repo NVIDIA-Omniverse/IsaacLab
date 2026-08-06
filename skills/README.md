@@ -9,6 +9,10 @@ Developer skills:
 - `developer/pr-workflow/`: prepare changes for review using Isaac Lab's PR, commit, changelog, and validation conventions.
 - `developer/changelog-fragments/`: add and validate package changelog fragments.
 - `developer/coding-style/`: apply Isaac Lab coding style, API design, docstring, type-hint, lazy export, and contribution conventions.
+- `developer/perf-bisection/`: route performance investigations through reproducible single-commit benchmarking, deterministic threshold checks, or paired-reference bisection.
+- `developer/perf-benchmark-commit/`: benchmark one Isaac Lab revision with pinned harness-owned tooling.
+- `developer/perf-threshold-check/`: classify existing performance evidence without running simulation.
+- `developer/perf-bisect-range/`: qualify good and bad references and locate the first regressing commit.
 
 User skills:
 

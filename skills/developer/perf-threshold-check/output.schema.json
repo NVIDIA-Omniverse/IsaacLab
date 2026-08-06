@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isaac-sim.github.io/IsaacLab/schemas/perf-threshold-check-output-v1.json",
+  "title": "Isaac Lab performance threshold response",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "operation",
+    "status",
+    "exit_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "error"
+      ]
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "mode": {
+      "enum": [
+        "ci_gate",
+        "paired_reference"
+      ]
+    },
+    "result": {
+      "type": "object"
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

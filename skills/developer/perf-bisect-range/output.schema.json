@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isaac-sim.github.io/IsaacLab/schemas/perf-bisect-range-output-v1.json",
+  "title": "Isaac Lab performance bisection response",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "operation",
+    "status",
+    "exit_code"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "inconclusive",
+        "unsupported_tooling_contract",
+        "error"
+      ]
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "result": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
