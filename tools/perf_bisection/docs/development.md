@@ -13,9 +13,9 @@ From the Isaac Lab repository root, create an environment with Python 3.11 or
 newer, then install the package:
 
 ```bash
-python3 -m venv .venv-bisection
+uv venv --python 3.12 .venv-bisection
 source .venv-bisection/bin/activate
-python -m pip install --editable "./tools/perf_bisection[test]"
+uv pip install --python .venv-bisection/bin/python --editable "./tools/perf_bisection[test]"
 ```
 
 Run the CPU-only validation:

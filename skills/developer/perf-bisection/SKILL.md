@@ -33,7 +33,7 @@ This Skill contains instructions, not the executable runtime. Before starting:
 2. Prefer the repository-local executables
    `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect` and
    `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill`.
-3. If they are absent, show the two local installation commands in the
+3. If they are absent, show the repository-local installation plan in the
    [runtime bootstrap](reference.md#runtime-bootstrap) and obtain one explicit
    confirmation before creating the environment or installing the package.
 4. Verify both executables with `--help`, then use their exact paths for the

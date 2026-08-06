@@ -31,12 +31,16 @@ If either executable is missing, show this plan and obtain one confirmation
 before running it:
 
 ```bash
-python3 -m venv "$REPO_ROOT/.venv-bisection"
-"$REPO_ROOT/.venv-bisection/bin/python" -m pip install "$REPO_ROOT/tools/perf_bisection"
+uv venv --python 3.12 --clear "$REPO_ROOT/.venv-bisection"
+uv pip install \
+    --python "$REPO_ROOT/.venv-bisection/bin/python" \
+    "$REPO_ROOT/tools/perf_bisection"
 "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect" --help
 "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" --help
 ```
 
+If `uv` is unavailable, stop and route host onboarding through the official
+Isaac Lab installation workflow. Do not fall back to a pre-3.11 system Python.
 Use these exact repository-local executable paths afterward. For
 `docker-reconstruct`, also check for the selected image with
 `docker image inspect`. If it is absent, obtain confirmation before building it

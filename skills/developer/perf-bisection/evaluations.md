@@ -138,18 +138,21 @@ Known failure modes:
 
 ## Scenario 9: Runtime Is Not Installed
 
-Query: "Bisect this regression from my Isaac Lab checkout."
+Query: "Bisect this regression from my Isaac Lab checkout; system python3 is
+3.10."
 
 Expected behavior:
 
 - Detects `tools/perf_bisection/pyproject.toml`.
 - Shows the repository-local virtual-environment installation plan.
+- Uses `uv` to select Python 3.12 instead of the incompatible system Python.
 - Obtains confirmation before installing and verifies both executables.
 - Uses `.venv-bisection/bin/isaaclab-bisect` for the run.
 
 Known failure modes:
 
 - Assumes `isaaclab-bisect` is already on `PATH`.
+- Creates an unusable environment from the system's Python 3.10.
 - Installs packages or builds a container without confirmation.
 
 ## Scenario 10: Skill Installed Without Isaac Lab

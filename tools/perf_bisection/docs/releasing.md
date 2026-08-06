@@ -43,9 +43,9 @@ Before announcing a release to other developers, validate from a new clone on a
 host that does not have the source checkout on `PYTHONPATH`:
 
 ```bash
-python3 -m venv /tmp/isaaclab-bisect-release
+uv venv --python 3.12 /tmp/isaaclab-bisect-release
 source /tmp/isaaclab-bisect-release/bin/activate
-python -m pip install ./tools/perf_bisection
+uv pip install --python /tmp/isaaclab-bisect-release/bin/python ./tools/perf_bisection
 isaaclab-bisect --help
 ```
 

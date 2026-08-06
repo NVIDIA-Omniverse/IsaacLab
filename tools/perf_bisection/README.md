@@ -19,22 +19,23 @@ integration point.
 
 ## Install from Isaac Lab
 
-The agent is maintained inside the Isaac Lab repository. Python 3.11 or newer
-is required. Use a virtual environment on distributions such as Ubuntu 24.04
-that protect the system Python environment. Minimal Ubuntu installations may
-need the distribution's `python3-venv` package first:
+The agent is maintained inside the Isaac Lab repository and requires Python
+3.11 or newer. Use Isaac Lab's standard `uv` tooling to select Python 3.12
+independently of the host's default `python3`:
 
 ```bash
-python3 -m venv .venv-bisection
-.venv-bisection/bin/python -m pip install ./tools/perf_bisection
+uv venv --python 3.12 .venv-bisection
+uv pip install --python .venv-bisection/bin/python ./tools/perf_bisection
 .venv-bisection/bin/isaaclab-bisect --help
 ```
 
 For development:
 
 ```bash
-python3 -m venv .venv-bisection
-.venv-bisection/bin/python -m pip install --editable "./tools/perf_bisection[test]"
+uv venv --python 3.12 .venv-bisection
+uv pip install \
+    --python .venv-bisection/bin/python \
+    --editable "./tools/perf_bisection[test]"
 ```
 
 Real benchmark runs require Linux, Git, an NVIDIA GPU/driver compatible with the
