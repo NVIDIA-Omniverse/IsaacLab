@@ -12,10 +12,9 @@ performance metric. It checks out each candidate, reconstructs that commit's
 pinned runtime stack, runs one fixed benchmark contract, and preserves the
 evidence needed to defend the verdict.
 
-The project is currently an alpha developer preview. Deterministic code owns
-measurement, thresholding, and binary-search decisions. Optional LLM policies
-may diagnose setup failures and propose bounded retries, but cannot change a
-`GOOD` or `BAD` verdict. Post-bisection trace analysis remains an external
+Deterministic code owns measurement, thresholding, and binary-search decisions.
+Optional LLM policies may diagnose setup failures and propose bounded retries,
+but cannot change `GOOD` or `BAD` verdicts. Post-bisection trace analysis remains an external
 integration point.
 
 ## Install from Isaac Lab
@@ -167,10 +166,13 @@ verdicts. See [the compatibility policy](docs/compatibility.md).
 
 The repository ships operator and automation playbooks under the native
 [`skills/`](../../skills/README.md) catalog. The three atomic operations share
-one JSON adapter:
+one JSON adapter. The Skills first verify the native source and repository-local
+`.venv-bisection` runtime, and ask before installing it when missing:
 
 ```bash
-isaaclab-bisect-skill --input request.json --output response.json
+.venv-bisection/bin/isaaclab-bisect-skill \
+    --input request.json \
+    --output response.json
 ```
 
 The adapter preserves the canonical artifacts and returns a small response

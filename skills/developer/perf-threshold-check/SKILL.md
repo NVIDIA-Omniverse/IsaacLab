@@ -19,13 +19,23 @@ Choose `ci_gate` for `PASS`/`WARN`/`BLOCK`/`HARD_FAILURE` against rolling
 baseline statistics and configured FPS floors. Choose `paired_reference` for
 reference-signal checks or `GOOD`/`BAD`/`UNCLEAR` candidate classification.
 
+## Runtime Access
+
+Set `REPO_ROOT` from `git rev-parse --show-toplevel`, then require
+`$REPO_ROOT/tools/perf_bisection/pyproject.toml` and
+`$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill`. If the executable is
+absent, show the installation commands in the
+[runtime bootstrap](../perf-bisection/reference.md#runtime-bootstrap) and obtain
+confirmation before installing. If the source file is absent, stop: the Skill
+alone does not contain the runtime.
+
 ## Workflow
 
 1. Create an input matching [input.schema.json](input.schema.json).
 2. Run:
 
    ```bash
-   isaaclab-bisect-skill \
+   "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" \
        --input threshold-input.json \
        --output threshold-output.json
    ```

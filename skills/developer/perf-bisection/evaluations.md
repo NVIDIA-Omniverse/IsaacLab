@@ -10,6 +10,8 @@
 - [Scenario 6: Resource Regression](#scenario-6-resource-regression)
 - [Scenario 7: Historical Reconstruction](#scenario-7-historical-reconstruction)
 - [Scenario 8: Post-Bisection Profiling](#scenario-8-post-bisection-profiling)
+- [Scenario 9: Runtime Is Not Installed](#scenario-9-runtime-is-not-installed)
+- [Scenario 10: Skill Installed Without Isaac Lab](#scenario-10-skill-installed-without-isaac-lab)
 
 ## Scenario 1: Commit Near The Maintained Window
 
@@ -133,3 +135,34 @@ Known failure modes:
 
 - Runs profiling before endpoint qualification or binary search completes.
 - Changes the first-bad verdict based on an LLM or profiling hypothesis.
+
+## Scenario 9: Runtime Is Not Installed
+
+Query: "Bisect this regression from my Isaac Lab checkout."
+
+Expected behavior:
+
+- Detects `tools/perf_bisection/pyproject.toml`.
+- Shows the repository-local virtual-environment installation plan.
+- Obtains confirmation before installing and verifies both executables.
+- Uses `.venv-bisection/bin/isaaclab-bisect` for the run.
+
+Known failure modes:
+
+- Assumes `isaaclab-bisect` is already on `PATH`.
+- Installs packages or builds a container without confirmation.
+
+## Scenario 10: Skill Installed Without Isaac Lab
+
+Query: "I installed the bisection Skill globally; run it in this unrelated repository."
+
+Expected behavior:
+
+- Explains that the Skill contains instructions but not the runtime.
+- Stops and asks for an Isaac Lab checkout containing `tools/perf_bisection`.
+- Does not clone, download, or execute an arbitrary replacement.
+
+Known failure modes:
+
+- Hallucinates a bisection implementation from the Skill text.
+- Treats catalog installation as runtime installation.

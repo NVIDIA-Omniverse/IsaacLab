@@ -8,7 +8,7 @@ SPDX-License-Identifier: BSD-3-Clause
 # Publishing
 
 Isaac Lab is the source of truth for the bisection runtime and its Agent Skills.
-The package remains a `0.x` developer preview while its plugin and artifact
+The package remains in the `0.x` version series while its plugin and artifact
 contracts stabilize. Do not publish a separate source repository.
 
 ## Release checklist
@@ -32,10 +32,10 @@ mirror the aliases under `.agents/skills/` into `nvidia/skills`. The native
 Isaac Lab skill remains authoritative; the catalog entry is a distribution
 mirror.
 
-The initial developer preview does not publish a container image. Users build
-the pinned Dockerfile from their Isaac Lab checkout. Any future package or
-container publication requires a separately reviewed workflow and immutable
-artifact provenance.
+The current distribution does not publish a container image. Users build the
+pinned Dockerfile from their Isaac Lab checkout. Any future package or container
+publication requires a separately reviewed workflow and immutable artifact
+provenance.
 
 ## Clean-clone acceptance
 

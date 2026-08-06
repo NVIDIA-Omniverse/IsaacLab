@@ -22,6 +22,24 @@ also run locally, but recommend stable dedicated hardware when the result needs
 to be authoritative. Do not assume access to internal infrastructure or automate
 host provisioning.
 
+## Runtime Access
+
+This Skill contains instructions, not the executable runtime. Before starting:
+
+1. Set `REPO_ROOT` from `git rev-parse --show-toplevel` and require
+   `tools/perf_bisection/pyproject.toml`. If it is absent, stop and explain that
+   the Skill alone cannot run a bisection. Do not clone or install code from an
+   arbitrary source.
+2. Prefer the repository-local executables
+   `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect` and
+   `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill`.
+3. If they are absent, show the two local installation commands in the
+   [runtime bootstrap](reference.md#runtime-bootstrap) and obtain one explicit
+   confirmation before creating the environment or installing the package.
+4. Verify both executables with `--help`, then use their exact paths for the
+   rest of the workflow. Do not assume an unrelated command on `PATH` matches
+   this checkout.
+
 ## Workflow
 
 1. Identify the commit or good/bad range, task, backend, workload size, metric,
@@ -64,14 +82,15 @@ host provisioning.
    stack-scoped cache identity, and is excluded from statistics.
 4. Confirm every range attempt uses the plan's one `tooling_spec_hash`.
 5. Confirm hardware identity and mismatch warnings are present.
-6. Run `isaaclab-bisect-upstream-skills validate` when changing upstream
-   handoffs or pins.
+6. Run the `validate` subcommand through the repository-local
+   `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-upstream-skills` executable
+   when changing upstream handoffs or pins.
 7. For a regression fix, verify its regression test fails without the fix.
 
 For skill changes, run:
 
 ```bash
-./isaaclab.sh -p -m pytest -q tools/perf_bisection/tests
+uv run python -m pytest -q tools/perf_bisection/tests
 uv run --no-project python tools/skills/cli.py check
 ```
 

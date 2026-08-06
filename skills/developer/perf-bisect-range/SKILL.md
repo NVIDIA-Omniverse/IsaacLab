@@ -17,6 +17,16 @@ The workflow qualifies both endpoints before binary search and returns
 `isaaclab-perf-benchmark-commit` for one revision and
 `isaaclab-perf-threshold-check` for comparison without execution.
 
+## Runtime Access
+
+Set `REPO_ROOT` from `git rev-parse --show-toplevel`, then require
+`$REPO_ROOT/tools/perf_bisection/pyproject.toml` and
+`$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill`. If the executable is
+absent, show the installation commands in the
+[runtime bootstrap](../perf-bisection/reference.md#runtime-bootstrap) and obtain
+confirmation before installing. If the source file is absent, stop: the Skill
+alone does not contain the runtime.
+
 ## Workflow
 
 1. Create an input matching [input.schema.json](input.schema.json). Use a full
@@ -24,7 +34,7 @@ The workflow qualifies both endpoints before binary search and returns
 2. Run:
 
    ```bash
-   isaaclab-bisect-skill \
+   "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" \
        --input bisect-input.json \
        --output bisect-output.json
    ```

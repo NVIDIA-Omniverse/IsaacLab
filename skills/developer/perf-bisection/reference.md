@@ -2,6 +2,7 @@
 
 ## Contents
 
+- Runtime bootstrap
 - Single-commit workflow
 - Range workflow
 - Automation workflow
@@ -10,12 +11,44 @@
 - Hardware guidance
 - Validation commands
 
+## Runtime Bootstrap
+
+The Skill is an instruction layer and does not carry Python or container code.
+Run these read-only checks from the current checkout:
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+test -f "$REPO_ROOT/tools/perf_bisection/pyproject.toml"
+test -x "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect"
+test -x "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill"
+```
+
+If `pyproject.toml` is missing, stop and ask the user to open an Isaac Lab
+checkout that contains the native runtime. Do not clone an arbitrary repository
+or substitute model-generated bisection code.
+
+If either executable is missing, show this plan and obtain one confirmation
+before running it:
+
+```bash
+python3 -m venv "$REPO_ROOT/.venv-bisection"
+"$REPO_ROOT/.venv-bisection/bin/python" -m pip install "$REPO_ROOT/tools/perf_bisection"
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect" --help
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" --help
+```
+
+Use these exact repository-local executable paths afterward. For
+`docker-reconstruct`, also check for the selected image with
+`docker image inspect`. If it is absent, obtain confirmation before building it
+from `tools/perf_bisection/docker/Dockerfile`; do not pull or execute an
+unreviewed replacement image.
+
 ## Single-Commit Workflow
 
 Use the host directly:
 
 ```bash
-isaaclab-bisect benchmark-commit \
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect" benchmark-commit \
     --repo_root /path/to/IsaacLab \
     --commit <SHA> \
     --tooling_ref <TOOLING_SHA> \
@@ -38,7 +71,7 @@ isolation. Both modes reconstruct the commit's pinned runtime stack.
 The same range command runs locally or on a dedicated host:
 
 ```bash
-isaaclab-bisect bisect-range \
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect" bisect-range \
     --repo_root /path/to/IsaacLab \
     --good_ref <GOOD_SHA> \
     --bad_ref <BAD_SHA> \
@@ -62,7 +95,7 @@ isaaclab-bisect bisect-range \
 The three atomic Skills share one versioned adapter:
 
 ```bash
-isaaclab-bisect-skill \
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" \
     --input <request.json> \
     --output <response.json>
 ```
@@ -93,8 +126,11 @@ The reviewed upstream Skill pins are stored in
 - Use `profile-isaac-sim` after a culprit is identified and only when its
   release-build profiling workflow applies.
 
-Generate immutable installation commands with
-`isaaclab-bisect-upstream-skills commands --agent cursor`.
+Generate immutable installation commands with:
+
+```bash
+"$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-upstream-skills" commands --agent cursor
+```
 
 ## Pinned Tooling and Support Window
 

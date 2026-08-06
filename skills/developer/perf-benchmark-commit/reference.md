@@ -64,7 +64,9 @@ The adapter does not copy raw logs into the response. Follow paths in
 
 ## Automation Contract
 
-- Invoke through the installed `isaaclab-bisect-skill` command.
+- Invoke through
+  `$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill` from the current Isaac
+  Lab checkout.
 - Give every invocation a fresh `work_dir`, or deliberately resume the same run.
 - Parse the output file, not stdout.
 - Preserve the entire response and work directory as one audit unit.

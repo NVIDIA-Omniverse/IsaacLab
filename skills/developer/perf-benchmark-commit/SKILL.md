@@ -15,6 +15,16 @@ Use this skill to measure one commit without comparing it to a baseline or
 searching a range. For a gate verdict use `isaaclab-perf-threshold-check`; for a
 first-bad search use `isaaclab-perf-bisect-range`.
 
+## Runtime Access
+
+Set `REPO_ROOT` from `git rev-parse --show-toplevel`, then require
+`$REPO_ROOT/tools/perf_bisection/pyproject.toml` and
+`$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill`. If the executable is
+absent, show the installation commands in the
+[runtime bootstrap](../perf-bisection/reference.md#runtime-bootstrap) and obtain
+confirmation before installing. If the source file is absent, stop: the Skill
+alone does not contain the runtime.
+
 ## Workflow
 
 1. Create an input matching [input.schema.json](input.schema.json). Pin
@@ -24,7 +34,7 @@ first-bad search use `isaaclab-perf-bisect-range`.
 3. Run the JSON adapter:
 
    ```bash
-   isaaclab-bisect-skill \
+   "$REPO_ROOT/.venv-bisection/bin/isaaclab-bisect-skill" \
        --input benchmark-input.json \
        --output benchmark-output.json
    ```
