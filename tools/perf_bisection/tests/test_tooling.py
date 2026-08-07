@@ -7,12 +7,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,23 @@ from isaaclab_bisection.runner import (  # noqa: E402
     _build_tooling_capability_command,
     _verify_mounted_tooling,
 )
+
+
+def _load_tooling_capability_module() -> ModuleType:
+    path = _REPO_ROOT / "tools" / "perf_smoke_test" / "tooling_capability.py"
+    spec = importlib.util.spec_from_file_location("test_tooling_capability", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _fake_module(name: str, attributes: tuple[str, ...] = ()) -> ModuleType:
+    module = ModuleType(name)
+    for attribute in attributes:
+        setattr(module, attribute, object())
+    return module
 
 
 @pytest.fixture
@@ -100,6 +118,27 @@ def test_capability_command_uses_pinned_tooling(tmp_path: Path) -> None:
 
     assert command[2] == str(tmp_path / "tooling" / "tooling_capability.py")
     assert command[-1] == str(tmp_path / "artifacts" / "tooling_capability.json")
+
+
+@pytest.mark.parametrize("benchmark_namespace", ["isaaclab.benchmark", "isaaclab.test.benchmark"])
+def test_tooling_capability_accepts_current_and_legacy_benchmark_namespaces(
+    monkeypatch: pytest.MonkeyPatch, benchmark_namespace: str
+) -> None:
+    benchmark_attributes = ("BaseIsaacLabBenchmark", "BenchmarkMonitor", "builders", "capture", "stepping")
+    modules = {
+        "isaaclab": _fake_module("isaaclab"),
+        "isaaclab.app": _fake_module("isaaclab.app", ("AppLauncher", "launch_simulation")),
+        benchmark_namespace: _fake_module(benchmark_namespace, benchmark_attributes),
+        f"{benchmark_namespace}.schema": _fake_module(f"{benchmark_namespace}.schema", ("StartupTime",)),
+        "isaaclab_tasks": _fake_module("isaaclab_tasks"),
+        "isaaclab_tasks.utils": _fake_module("isaaclab_tasks.utils", ("setup_preset_cli", "resolve_task_config")),
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    capability = _load_tooling_capability_module()
+
+    assert capability.check_capabilities() == []
 
 
 def test_resolved_plan_pins_task_metric_and_warmups() -> None:

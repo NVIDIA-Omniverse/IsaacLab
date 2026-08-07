@@ -6,11 +6,11 @@
 
 """Local-testing stub that fakes a ``perf_runtime.py`` run without a GPU/sim.
 
-Emits a schema-v1 :class:`~isaaclab.test.benchmark.schema.RuntimeBundle`
+Emits a schema-v1 :class:`~isaaclab.benchmark.schema.RuntimeBundle`
 (``benchmark_runtime_{task}_{stamp}.json``) identical in shape to what the real
 driver writes, so ``build_bench_result.py`` -> ``benchmark_result_adapter`` ->
 ``oracle`` can be exercised end-to-end offline. Uses the real
-``isaaclab.test.benchmark`` builders/serialize (pure-Python, no GPU), so it stays
+``isaaclab.benchmark`` builders/serialize (pure-Python, no GPU), so it stays
 in lockstep with the schema; run it with the Isaac Lab Python env.
 """
 
@@ -26,8 +26,8 @@ if str(_MODULE_DIR) not in sys.path:
 
 from backend_identity import split_backend_key  # noqa: E402
 
-from isaaclab.test.benchmark import builders, serialize  # noqa: E402
-from isaaclab.test.benchmark.schema import (  # noqa: E402
+from isaaclab.benchmark import builders, serialize  # noqa: E402
+from isaaclab.benchmark.schema import (  # noqa: E402
     GpuDeviceInfo,
     Hardware,
     MeanStd,

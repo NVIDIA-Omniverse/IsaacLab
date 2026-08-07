@@ -851,7 +851,24 @@ class TestResolveHydraArgs:
         args = argparse.Namespace(hydra_arg=[])
         resolved = runner._resolve_hydra_args(args, task)
         assert isinstance(resolved, list)
-        assert any("newton" in item for item in resolved)
+        assert resolved == ["physics=newton_mjwarp"]
+
+    def test_physx_backend_selects_isaac_sim_physx(self) -> None:
+        task = runner._build_task(
+            argparse.Namespace(
+                task_id="Isaac-Cartpole-Direct",
+                backend_key="physx",
+                tasks_json=None,
+                num_envs=None,
+                num_frames=None,
+                warmup_frames=None,
+                seed=None,
+                camera_resolution=None,
+                timeout_minutes=None,
+            )
+        )
+
+        assert runner._resolve_hydra_args(argparse.Namespace(hydra_arg=[]), task) == ["physics=isaacsim_physx"]
 
 
 class TestEngineForwardsTaskSpec:

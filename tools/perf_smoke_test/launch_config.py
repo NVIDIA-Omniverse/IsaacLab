@@ -55,14 +55,16 @@ def workload_contract(config: dict[str, Any]) -> dict[str, Any]:
 
 def hydra_args_for_task(task: TaskConfig) -> list[str]:
     """Return Hydra args used by the current local/CI benchmark launch path."""
-    presets: list[str] = []
-    if task.physics_backend == "newton":
-        presets.append("newton_mjwarp")
+    args: list[str] = []
+    if task.physics_backend == "physx":
+        args.append("physics=isaacsim_physx")
+    elif task.physics_backend == "newton":
+        args.append("physics=newton_mjwarp")
     if task.render_backend:
-        presets.append(task.render_backend)
+        args.append(f"renderer={task.render_backend}")
         if task.render_backend == "newton_renderer":
-            presets.append("rgb")
-    return [f"presets={','.join(presets)}"] if presets else []
+            args.append("presets=rgb")
+    return args
 
 
 def task_to_launch_config(
