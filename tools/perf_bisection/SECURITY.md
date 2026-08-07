@@ -58,6 +58,10 @@ credential is rotated. Re-run the scan explicitly with:
 isaaclab-bisect-scan-artifacts <OUTPUT_DIR>
 ```
 
+The scan excludes `env-cache/`, `jit-cache/`, `kit-cache/`, and `sources/`.
+These directories are runtime state, not evidence, and must not be included in
+anything shared or uploaded.
+
 ## Shared resources and releases
 
 The agent does not merge pull requests, push protected branches, publish

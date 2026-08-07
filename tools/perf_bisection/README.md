@@ -160,6 +160,10 @@ Important outputs include:
 - `security_scan.json`: value-free credential finding locations; a `blocked`
   status prohibits sharing until reviewed and remediated.
 
+The security scan excludes `env-cache/`, `jit-cache/`, `kit-cache/`, and
+`sources/` because they are large, non-shareable runtime state. Do not include
+those directories when packaging evidence for another person or system.
+
 Setup and tooling incompatibilities are structured skips, not performance
 verdicts. See [the compatibility policy](docs/compatibility.md).
 

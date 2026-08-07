@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 _MAX_FILE_SIZE = 10 * 1024 * 1024
+_EXCLUDED_DIRECTORY_NAMES = frozenset({"env-cache", "jit-cache", "kit-cache", "sources"})
 _PATTERNS = (
     ("private_key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
     ("authorization_bearer", re.compile(r"(?i)\bauthorization\s*:\s*bearer\s+\S+")),
@@ -53,20 +55,28 @@ def scan_artifacts(root: Path) -> dict[str, Any]:
         "status": "blocked" if findings else "passed",
         "finding_count": len(findings),
         "findings": findings,
-        "note": "Potential secret values are intentionally omitted. Review findings before sharing artifacts.",
+        "excluded_directory_names": sorted(_EXCLUDED_DIRECTORY_NAMES),
+        "note": (
+            "Potential secret values are intentionally omitted. Review findings before sharing artifacts. "
+            "Reconstructed environments, caches, and source clones are excluded and must not be shared."
+        ),
     }
 
 
 def _iter_text_files(root: Path) -> Iterator[Path]:
-    """Yield bounded regular files while excluding this scanner's own report."""
-    for path in root.rglob("*"):
-        if path.name == "security_scan.json" or not path.is_file():
-            continue
-        try:
-            if path.stat().st_size <= _MAX_FILE_SIZE:
-                yield path
-        except OSError:
-            continue
+    """Yield bounded evidence files without traversing non-shareable run caches."""
+    for directory, names, filenames in os.walk(root):
+        names[:] = [name for name in names if name not in _EXCLUDED_DIRECTORY_NAMES]
+        directory_path = Path(directory)
+        for filename in filenames:
+            if filename == "security_scan.json":
+                continue
+            path = directory_path / filename
+            try:
+                if path.is_file() and path.stat().st_size <= _MAX_FILE_SIZE:
+                    yield path
+            except OSError:
+                continue
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

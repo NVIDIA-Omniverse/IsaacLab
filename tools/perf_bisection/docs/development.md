@@ -32,6 +32,8 @@ uv run --no-project python tools/skills/cli.py check
 Unit and synthetic tests must not require Isaac Sim, a GPU, or Docker.
 Scan any generated run directory with
 `isaaclab-bisect-scan-artifacts <OUTPUT_DIR>` before sharing it.
+The scanner excludes reconstructed environments, caches, and source clones;
+never include those excluded directories in a shared evidence archive.
 
 ## Container
 
