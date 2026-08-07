@@ -71,14 +71,14 @@ def test_llm_endpoint_must_be_explicit_and_secure() -> None:
     with pytest.raises(ValueError, match="private, link-local, or reserved"):
         validate_llm_base_url("https://169.254.169.254/v1")
 
-    assert validate_llm_base_url("https://inference.nvidia.com/v1/") == "https://inference.nvidia.com/v1"
+    assert validate_llm_base_url("https://inference-api.nvidia.com/v1/") == "https://inference-api.nvidia.com/v1"
     assert validate_llm_base_url("http://localhost:8000/v1") == "http://localhost:8000/v1"
 
 
 def test_llm_endpoint_honors_deployment_host_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ISAACLAB_BISECTION_LLM_HOSTS", "inference.nvidia.com")
+    monkeypatch.setenv("ISAACLAB_BISECTION_LLM_HOSTS", "inference-api.nvidia.com")
 
-    assert validate_llm_base_url("https://inference.nvidia.com/v1") == "https://inference.nvidia.com/v1"
+    assert validate_llm_base_url("https://inference-api.nvidia.com/v1") == "https://inference-api.nvidia.com/v1"
     with pytest.raises(ValueError, match="not in ISAACLAB_BISECTION_LLM_HOSTS"):
         validate_llm_base_url("https://models.example.com/v1")
 

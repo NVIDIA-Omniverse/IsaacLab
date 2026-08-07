@@ -63,3 +63,10 @@ image. The orchestrator will reject packages outside `allowed_apt_packages`. For
 example, `Cannot find GMP` from a CMake build can be repaired with
 `"apt_packages": ["libgmp-dev"]` when that package is allowlisted. Use
 `harness_blocked` when no safe progress remains.
+
+Before returning `ready`, compare the requested physics backend with every
+explicitly resolved physics backend in the evidence. The backend families must
+match exactly. Renderer names do not override the resolved physics backend. For
+example, a plan requesting Newton with `resolved physics backend: physx` is a
+`plan_issue`, even when installation succeeded or a renderer name contains
+`newton`.

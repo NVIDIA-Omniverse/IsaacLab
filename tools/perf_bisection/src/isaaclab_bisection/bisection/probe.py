@@ -17,6 +17,7 @@ of a located regression. Those remain outside the setup probe.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -42,6 +43,10 @@ PROBE_ACTIONS = frozenset(
 )
 
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "container_probe.md"
+_RESOLVED_BACKEND_PATTERNS = (
+    re.compile(r"resolved physics backend:\s*([A-Za-z0-9_.-]+)", re.IGNORECASE),
+    re.compile(r"\bKit started,\s*backend\s*=\s*([A-Za-z0-9_.-]+)", re.IGNORECASE),
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +126,30 @@ def _context_prompt(ctx: ProbeContext) -> str:
     return redact_sensitive_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _backend_family(value: str) -> str | None:
+    """Return the supported physics-backend family named by ``value``."""
+    normalized = value.strip().lower()
+    if normalized.startswith("newton") or "newton_mjwarp" in normalized:
+        return "newton"
+    if normalized.startswith("physx") or "isaacsim_physx" in normalized:
+        return "physx"
+    return None
+
+
+def _explicit_backend_mismatch(ctx: ProbeContext) -> tuple[str, str] | None:
+    """Detect an explicit resolved physics backend that contradicts the plan."""
+    expected = _backend_family(ctx.backend_key)
+    if expected is None:
+        return None
+    evidence = "\n".join((ctx.live_output_tail, ctx.benchmark_log_tail))
+    for pattern in _RESOLVED_BACKEND_PATTERNS:
+        for match in pattern.finditer(evidence):
+            resolved = _backend_family(match.group(1))
+            if resolved is not None and resolved != expected:
+                return expected, resolved
+    return None
+
+
 @dataclass
 class NoProbePolicy:
     """Probe policy that immediately allows benchmarking."""
@@ -160,11 +189,22 @@ class LLMProbePolicy:
                 f"probe model unavailable: {exc}",
                 confidence="high",
             )
-        return self._parse(reply) or ProbeDecision(
-            PROBE_ACTION_HARNESS_BLOCKED,
-            "probe model returned an invalid decision",
-            confidence="high",
-        )
+        decision = self._parse(reply)
+        if decision is None:
+            return ProbeDecision(
+                PROBE_ACTION_HARNESS_BLOCKED,
+                "probe model returned an invalid decision",
+                confidence="high",
+            )
+        if decision.action == PROBE_ACTION_READY and (mismatch := _explicit_backend_mismatch(ctx)):
+            expected, resolved = mismatch
+            return ProbeDecision(
+                PROBE_ACTION_HARNESS_BLOCKED,
+                f"probe model marked the container ready despite an explicit backend mismatch: "
+                f"requested {expected}, resolved {resolved}",
+                confidence="high",
+            )
+        return decision
 
     def _parse(self, reply: str) -> ProbeDecision | None:
         text = reply.strip()

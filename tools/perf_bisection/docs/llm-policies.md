@@ -14,9 +14,9 @@ classification or binary-search decisions.
 No provider is selected by default. Always pass `--base_url`; remote endpoints
 must use HTTPS and URLs containing credentials are rejected. NVIDIA users must
 select an endpoint approved by the Agent Security Readiness portal (normally
-`inference.nvidia.com` when NVIDIA data or internal network access is present,
-or `build.nvidia.com` only in the documented isolated use case). Do not use a
-personal provider key with NVIDIA data.
+`inference-api.nvidia.com` when authorized for NVIDIA data or internal network
+access, or `build.nvidia.com` only in the documented isolated use case). Do not
+use a personal provider key with NVIDIA data.
 
 Deployments can enforce an exact hostname allowlist with the comma-separated
 `ISAACLAB_BISECTION_LLM_HOSTS` environment variable. Redirects are rejected so

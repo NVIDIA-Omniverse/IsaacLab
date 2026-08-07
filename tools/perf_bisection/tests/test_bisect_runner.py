@@ -39,6 +39,7 @@ from isaaclab_bisection.bisection.measurement import CommitMeasurementResult  # 
 from isaaclab_bisection.bisection.models import BisectionPlan, MetricSpec, RunnerSpec, TaskSpec  # noqa: E402
 from isaaclab_bisection.bisection.paired_reference import summarize_measurements  # noqa: E402
 from isaaclab_bisection.bisection.probe import (  # noqa: E402
+    PROBE_ACTION_HARNESS_BLOCKED,
     PROBE_ACTION_PLAN_ISSUE,
     PROBE_ACTION_READY,
     PROBE_ACTION_REPAIR_BASE_IMAGE,
@@ -1276,6 +1277,16 @@ class TestBaseImageRepair:
 class TestLLMProbePolicy:
     """The LLM-driven probe parser accepts structured setup-doctor decisions."""
 
+    def _context(self, *, backend_key: str, live_output_tail: str) -> ProbeContext:
+        return ProbeContext(
+            commit_sha="0" * 40,
+            task_id="Isaac-Cartpole-Direct",
+            backend_key=backend_key,
+            artifact_dir=Path("."),
+            plan={"task_id": "Isaac-Cartpole-Direct", "backend_key": backend_key},
+            live_output_tail=live_output_tail,
+        )
+
     def test_parse_plan_issue_decision(self) -> None:
         policy = LLMProbePolicy(model="dummy-model")
         decision = policy._parse(
@@ -1315,6 +1326,42 @@ class TestLLMProbePolicy:
     def test_parse_rejects_unknown_action(self) -> None:
         policy = LLMProbePolicy(model="dummy-model")
         assert policy._parse('{"action": "good", "reason": "not allowed"}') is None
+
+    def test_ready_is_blocked_when_explicit_backend_mismatches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        policy = LLMProbePolicy(model="dummy-model")
+        monkeypatch.setattr(
+            policy._client,
+            "complete",
+            lambda system, user: '{"action":"ready","reason":"install succeeded","confidence":"high"}',
+        )
+
+        decision = policy.decide(
+            self._context(
+                backend_key="newton_newton_renderer",
+                live_output_tail="[INFO] resolved physics backend: physx\n"
+                "[INFO] renderer preset: physx_newton_renderer\n",
+            )
+        )
+
+        assert decision.action == PROBE_ACTION_HARNESS_BLOCKED
+        assert "requested newton, resolved physx" in decision.reason
+
+    def test_ready_is_allowed_when_explicit_backend_matches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        policy = LLMProbePolicy(model="dummy-model")
+        monkeypatch.setattr(
+            policy._client,
+            "complete",
+            lambda system, user: '{"action":"ready","reason":"backend matches","confidence":"high"}',
+        )
+
+        decision = policy.decide(
+            self._context(
+                backend_key="newton",
+                live_output_tail="[INFO] Kit started, backend=newton\n",
+            )
+        )
+
+        assert decision.action == PROBE_ACTION_READY
 
 
 @dataclass

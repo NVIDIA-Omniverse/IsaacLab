@@ -233,7 +233,7 @@ def _parse_args() -> argparse.Namespace:
     local.add_argument(
         "--base_url",
         default=None,
-        help="OpenAI-compatible base URL for --recovery llm (defaults to the provider default).",
+        help="Explicit OpenAI-compatible base URL required for --recovery llm or --probe llm.",
     )
     local.add_argument(
         "--api_key_env",
