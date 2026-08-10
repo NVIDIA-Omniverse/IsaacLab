@@ -1,0 +1,250 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+"""Oracle layer for the CI performance regression gate."""
+
+import json
+import statistics
+from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from .gate_config import DEFAULT_K_BLOCK, DEFAULT_K_WARN, MIN_BASELINE_SAMPLES, MIN_BLOCK_REGRESSION_PCT
+    from .gate_types import BisectVerdict, FailurePhase, OracleVerdict, ThresholdSource
+except ImportError:  # pragma: no cover (for direct scripting execution/import)
+    from gate_config import DEFAULT_K_BLOCK, DEFAULT_K_WARN, MIN_BASELINE_SAMPLES, MIN_BLOCK_REGRESSION_PCT
+    from gate_types import BisectVerdict, FailurePhase, OracleVerdict, ThresholdSource
+
+
+@dataclass
+class Baseline:
+    """Rolling-window statistics for one compatible benchmark history"""
+
+    median_fps: float
+    mad_fps: float
+    k_warn: float = DEFAULT_K_WARN
+    k_block: float = DEFAULT_K_BLOCK
+    sample_count: int = 0
+    source: str = "unknown"
+    total_sample_count: int | None = None
+
+
+@dataclass
+class OracleResult:
+    """Full verdict record produced by :func:`compare`"""
+
+    verdict: OracleVerdict
+    bisect_verdict: str
+    failure_phase: str | None
+    measured_fps: float | None
+    baseline_fps: float | None
+    regression_pct: float | None
+    fps_median: float | None
+    fps_p5: float | None
+    fps_p95: float | None
+    gpu_mem_used_mb: float | None
+    startup_time_s: float | None
+    wall_time_s: float | None
+    was_retried: bool
+    task_id: str
+    backend: str
+    baseline_sample_count: int = 0
+    baseline_source: str = "none"
+    threshold_source: str = ThresholdSource.NO_BASELINE.value
+    warn_threshold_fps: float | None = None
+    block_threshold_fps: float | None = None
+    hard_floor_fps: float | None = None
+    min_block_regression_pct: float = MIN_BLOCK_REGRESSION_PCT
+    note: str | None = None
+
+
+_BISECT_BAD_PHASES: frozenset[str] = frozenset({FailurePhase.INIT.value, FailurePhase.RUNTIME.value})
+
+
+def _bisect_verdict(verdict: OracleVerdict, was_retried: bool, failure_phase: str | None) -> str:
+    """Compute the bisect-friendly label for a given verdict."""
+    if verdict == OracleVerdict.PASS:
+        return BisectVerdict.SKIP.value if was_retried else BisectVerdict.GOOD.value
+    if verdict == OracleVerdict.WARN:
+        return BisectVerdict.SKIP.value
+    if verdict == OracleVerdict.BLOCK:
+        return BisectVerdict.BAD.value
+    if failure_phase in _BISECT_BAD_PHASES:
+        return BisectVerdict.BAD.value
+    return BisectVerdict.SKIP.value
+
+
+def _percentile(sorted_data: list[float], p: float) -> float:
+    """Linear-interpolation percentile on a pre-sorted non-empty list."""
+    n = len(sorted_data)
+    if n == 1:
+        return sorted_data[0]
+    idx = p / 100.0 * (n - 1)
+    lo = int(idx)
+    hi = min(lo + 1, n - 1)
+    return sorted_data[lo] + (sorted_data[hi] - sorted_data[lo]) * (idx - lo)
+
+
+def apply_excluded_frames(fps_series: list[float], excluded_frames: frozenset[int]) -> list[float]:
+    """Return fps_series with frames at 0-based indices listed in excluded_frames removed"""
+    if not excluded_frames:
+        return list(fps_series)
+    return [fps for idx, fps in enumerate(fps_series) if idx not in excluded_frames]
+
+
+def _hard_failure(
+    bench_result: dict,
+    failure_phase: str | None,
+    was_retried: bool,
+    gpu_mem_used_mb: float | None,
+    *,
+    note: str | None = None,
+) -> OracleResult:
+    verdict = OracleVerdict.HARD_FAILURE
+    return OracleResult(
+        verdict=verdict,
+        bisect_verdict=_bisect_verdict(verdict, was_retried, failure_phase),
+        failure_phase=failure_phase,
+        measured_fps=None,
+        baseline_fps=None,
+        regression_pct=None,
+        fps_median=None,
+        fps_p5=None,
+        fps_p95=None,
+        gpu_mem_used_mb=gpu_mem_used_mb,
+        startup_time_s=bench_result.get("startup_time_s"),
+        wall_time_s=bench_result.get("wall_time_s"),
+        was_retried=was_retried,
+        task_id=bench_result["task_id"],
+        backend=bench_result.get("backend_key") or bench_result["backend"],
+        threshold_source=ThresholdSource.NOT_APPLICABLE.value,
+        note=note,
+    )
+
+
+def _extract_fps_series(perf_regression_gate_info: list[dict]) -> list[float]:
+    for phase in perf_regression_gate_info:
+        if phase.get("phase_name") == "runtime":
+            for measurement in phase.get("measurements", []):
+                if measurement.get("name", "").endswith("Step Frametimes"):
+                    value = measurement.get("value", {})
+                    return list(value.get("Environment step effective FPS", []))
+            break
+    return []
+
+
+def compare(
+    bench_result: dict,
+    baseline: "Baseline | None",
+    fps_mean_floor: float,
+    excluded_frames: "frozenset[int]",
+    artifact_dir: "Path",
+    *,
+    min_block_regression_pct: float = MIN_BLOCK_REGRESSION_PCT,
+) -> OracleResult:
+    """Compare a benchmark result against its baseline and return an OracleResult."""
+    task_id: str = bench_result["task_id"]
+    backend: str = bench_result.get("backend_key") or bench_result["backend"]
+    failure_phase: str | None = bench_result.get("failure_phase")
+    was_retried: bool = bool(bench_result.get("was_retried"))
+    startup_time_s: float | None = bench_result.get("startup_time_s")
+    wall_time_s: float | None = bench_result.get("wall_time_s")
+    gpu_mem_used_mb: float | None = (bench_result.get("gpu_diag") or {}).get("gpu_mem_used_mb")
+
+    config_mismatch = bench_result.get("config_mismatch")
+    if config_mismatch or failure_phase == FailurePhase.CONFIG_MISMATCH.value:
+        return _hard_failure(
+            bench_result,
+            FailurePhase.CONFIG_MISMATCH.value,
+            was_retried,
+            gpu_mem_used_mb,
+            note=str(config_mismatch or "config_mismatch"),
+        )
+
+    if not bench_result.get("perf_regression_gate_info_present", False):
+        return _hard_failure(bench_result, failure_phase, was_retried, gpu_mem_used_mb)
+
+    perf_info_path = Path(artifact_dir) / "perf_regression_gate_info.json"
+    with perf_info_path.open() as fh:
+        perf_info = json.load(fh)
+
+    filtered = apply_excluded_frames(_extract_fps_series(perf_info), excluded_frames)
+    if not filtered:
+        return _hard_failure(bench_result, failure_phase, was_retried, gpu_mem_used_mb, note="empty_fps_series")
+
+    mean_fps = statistics.mean(filtered)
+    sorted_filtered = sorted(filtered)
+    fps_median = _percentile(sorted_filtered, 50.0)
+    fps_p5 = _percentile(sorted_filtered, 5.0)
+    fps_p95 = _percentile(sorted_filtered, 95.0)
+
+    baseline_fps = baseline.median_fps if baseline is not None else None
+    baseline_sample_count = baseline.sample_count if baseline is not None else 0
+    baseline_source = baseline.source if baseline is not None else "none"
+    regression_pct = None
+    if baseline_fps:
+        regression_pct = ((mean_fps - baseline_fps) / baseline_fps) * 100.0
+
+    hard_floor_fps = fps_mean_floor if fps_mean_floor > 0 else None
+    threshold_source = ThresholdSource.NO_BASELINE.value
+    warn_threshold = None
+    block_threshold = None
+    note = None
+
+    if fps_mean_floor > 0 and mean_fps < fps_mean_floor:
+        verdict = OracleVerdict.BLOCK
+        threshold_source = ThresholdSource.HARD_FLOOR.value
+        note = "below_hard_floor"
+    elif baseline is None:
+        verdict = OracleVerdict.WARN
+        note = "no_baseline"
+    elif baseline.sample_count < MIN_BASELINE_SAMPLES:
+        verdict = OracleVerdict.WARN
+        threshold_source = ThresholdSource.INSUFFICIENT_WINDOW.value
+        note = f"insufficient_baseline(n={baseline.sample_count},min={MIN_BASELINE_SAMPLES})"
+    else:
+        threshold_source = ThresholdSource.ROLLING_WINDOW.value
+        block_threshold = baseline.median_fps - baseline.k_block * baseline.mad_fps
+        warn_threshold = baseline.median_fps - baseline.k_warn * baseline.mad_fps
+        if mean_fps < block_threshold:
+            if regression_pct is None or regression_pct <= -float(min_block_regression_pct):
+                verdict = OracleVerdict.BLOCK
+            else:
+                verdict = OracleVerdict.WARN
+                note = "below_mad_block_but_inside_regression_floor"
+        elif mean_fps < warn_threshold:
+            verdict = OracleVerdict.WARN
+        else:
+            verdict = OracleVerdict.PASS
+
+    if verdict == OracleVerdict.PASS and was_retried:
+        verdict = OracleVerdict.WARN
+        note = note or "was_retried"
+
+    return OracleResult(
+        verdict=verdict,
+        bisect_verdict=_bisect_verdict(verdict, was_retried, failure_phase),
+        failure_phase=failure_phase,
+        measured_fps=mean_fps,
+        baseline_fps=baseline_fps,
+        regression_pct=regression_pct,
+        fps_median=fps_median,
+        fps_p5=fps_p5,
+        fps_p95=fps_p95,
+        gpu_mem_used_mb=gpu_mem_used_mb,
+        startup_time_s=startup_time_s,
+        wall_time_s=wall_time_s,
+        was_retried=was_retried,
+        task_id=task_id,
+        backend=backend,
+        baseline_sample_count=baseline_sample_count,
+        baseline_source=baseline_source,
+        threshold_source=threshold_source,
+        warn_threshold_fps=warn_threshold,
+        block_threshold_fps=block_threshold,
+        hard_floor_fps=hard_floor_fps,
+        min_block_regression_pct=float(min_block_regression_pct),
+        note=note,
+    )

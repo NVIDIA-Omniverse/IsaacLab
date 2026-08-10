@@ -1,0 +1,187 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    from .backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+except ImportError:  # pragma: no cover - supports direct script imports
+    from backend_identity import make_backend_key, normalize_physics_backend, normalize_render_backend
+
+_DEFAULT_TASKS_JSON = Path(__file__).parent / "tasks.json"
+
+# Maps backend name to list of cache identifiers that CI needs to pull; absent key defaults to no caches
+_BACKEND_CACHES: dict[str, list[str]] = {
+    "newton": ["mjwarp_jit"],
+}
+
+
+def caches_for_backend(backend: str) -> list[str]:
+    """Return cache identifiers required before benchmarking with a given physics backend.
+
+    The returned identifiers are consumed by the CI cache-pull step to locate and
+    restore named cache artifacts by name or pattern.  An empty list means no
+    pre-run cache restoration is needed.
+
+    Currently defined identifiers:
+        ``"mjwarp_jit"``: Newton MJWarp JIT compilation cache.
+
+    Args:
+        backend: Backend name (e.g. ``"newton"``, ``"physx"``).
+
+    Returns:
+        List of cache identifier strings.
+    """
+    return list(_BACKEND_CACHES.get(backend, []))
+
+
+@dataclass
+class TaskConfig:
+    """Configuration for a single benchmark task and backend combination."""
+
+    task_id: str
+    physics_backend: str
+    render_backend: str | None
+    preset: str
+    num_envs: int
+    num_frames: int
+    excluded_frames_raw: list[int | list[int]]
+    camera_resolution: tuple[int, int] | None
+    timeout_minutes: int
+    fps_mean_floor: dict
+    caches: list[str]
+    tags: list[str] = field(default_factory=lambda: ["always"])
+    task_type: str = "benchmark"
+    runs_on: str = "gpu-l40s"
+    seed: int | None = None
+    baseline_epoch: int = 1
+
+    @property
+    def backend_key(self) -> str:
+        """Composite key identifying the backend combination.
+
+        Returns f"{physics_backend}_{render_backend}" when render_backend is set,
+        otherwise returns physics_backend.
+        """
+        return make_backend_key(self.physics_backend, self.render_backend)
+
+    @property
+    def excluded_frames(self) -> frozenset[int]:
+        """Expand raw excluded_frames entries (single index or inclusive range) to a 
+        frozenset of integer frame indices.
+        """
+        indices: set[int] = set()
+        for entry in self.excluded_frames_raw:
+            if isinstance(entry, list):
+                if len(entry) != 2:
+                    raise ValueError(f"excluded_frames range entry must have exactly 2 elements, got {entry!r}")
+                start, end = entry[0], entry[1]
+                if start > end:
+                    raise ValueError(f"excluded_frames range start must be <= end, got [{start}, {end}]")
+                indices.update(range(start, end + 1))
+            else:
+                indices.add(int(entry))
+        return frozenset(indices)
+
+
+def _load_tasks_json(path: Path) -> tuple[dict, list[dict]]:
+    with open(path) as f:
+        raw_data = json.load(f)
+
+    if isinstance(raw_data, dict):
+        defaults = raw_data.get("defaults", {})
+        raw_list = raw_data.get("tasks", [])
+        if not isinstance(raw_list, list):
+            raise TypeError(f"'tasks' field in {path} must be a list")
+    elif isinstance(raw_data, list):
+        defaults = {}
+        raw_list = raw_data
+    else:
+        raise TypeError(f"{path} must contain a JSON list or an object with a top-level 'tasks' list")
+
+    if not isinstance(defaults, dict):
+        raise TypeError(f"'defaults' field in {path} must be an object")
+
+    return defaults, raw_list
+
+
+def load_tasks(tasks_json_path: Path | str | None = None) -> list[TaskConfig]:
+    """Load all benchmark tasks from tasks.json, producing a TaskConfig for each backend combination.
+
+    Args:
+        tasks_json_path: Path to tasks.json. Defaults to the tasks.json next to this module.
+
+    Returns:
+        List of TaskConfig objects, one per (task_id, backend) combination.
+    """
+    path = Path(tasks_json_path) if tasks_json_path is not None else _DEFAULT_TASKS_JSON
+    defaults, raw_list = _load_tasks_json(path)
+
+    tasks: list[TaskConfig] = []
+    for raw in raw_list:
+        if not isinstance(raw, dict):
+            raise TypeError(f"task entry in {path} must be an object")
+        merged = {**defaults, **raw}
+
+        camera_raw = merged.get("camera_resolution")
+        camera_resolution: tuple[int, int] | None = (
+            tuple(camera_raw) if camera_raw is not None else None  # type: ignore[assignment]
+        )
+        fps_mean_floor: dict = merged.get("fps_mean_floor", {})
+        backends: list[dict] = merged.get("backends", [])
+
+        for backend_entry in backends:
+            physics = normalize_physics_backend(backend_entry["physics"])
+            if physics is None:
+                raise ValueError(f"backend entry in {path} must define a non-default physics backend")
+            render = normalize_render_backend(backend_entry.get("render"))
+            tasks.append(
+                TaskConfig(
+                    task_id=merged["task_id"],
+                    physics_backend=physics,
+                    render_backend=render,
+                    preset=merged["preset"],
+                    num_envs=merged["num_envs"],
+                    num_frames=merged["num_frames"],
+                    excluded_frames_raw=merged["excluded_frames"],
+                    camera_resolution=camera_resolution,
+                    timeout_minutes=int(merged["timeout_minutes"]),
+                    fps_mean_floor=fps_mean_floor,
+                    caches=caches_for_backend(physics),
+                    tags=merged["tags"],
+                    task_type=merged["type"],
+                    runs_on=merged["runs_on"],
+                    seed=merged.get("seed"),
+                    baseline_epoch=int(merged.get("baseline_epoch", 1)),
+                )
+            )
+    return tasks
+
+
+def get_task(
+    task_id: str,
+    backend_key: str,
+    tasks_json_path: Path | str | None = None,
+) -> TaskConfig:
+    """Return the TaskConfig for the given task_id and backend_key combination.
+
+    Args:
+        task_id: The task identifier to look up.
+        backend_key: The backend key (e.g. "physx", "newton", "physx_rtx").
+        tasks_json_path: Optional path to tasks.json.
+
+    Returns:
+        The matching TaskConfig.
+
+    Raises:
+        KeyError: If no task with the given (task_id, backend_key) exists.
+    """
+    tasks = load_tasks(tasks_json_path)
+    for task in tasks:
+        if task.task_id == task_id and task.backend_key == backend_key:
+            return task
+    raise KeyError(f"Task not found: task_id={task_id!r} backend_key={backend_key!r}")
